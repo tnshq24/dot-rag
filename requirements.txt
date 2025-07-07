@@ -1,0 +1,9 @@
+flask==2.3.3
+azure-storage-blob==12.19.0
+azure-search-documents==11.5.3
+azure-core==1.35.0
+openai==1.93.0
+PyPDF2==3.0.1
+python-dotenv==1.0.0
+httpx>=0.24.0
+gunicorn==21.2.0 
