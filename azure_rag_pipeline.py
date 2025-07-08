@@ -599,32 +599,33 @@ class AzureRAGPipeline:
         Args:
             query: User's question
             context_docs: Retrieved documents for context
-            
+        
         Returns:
             Generated answer
         """
         try:
             # Step 1: Prepare the context from retrieved documents
+            def format_context_doc(doc):
+                page = doc.get('page_number', None)
+                if page and page != 'N/A':
+                    return f"Document: {doc['filepath']} (Page {page})\n{doc['content']}"
+                else:
+                    return f"Document: {doc['filepath']}\n{doc['content']}"
             context = "\n\n".join([
-                f"Document: {doc['filepath']} (Page {doc['page_number']})\n{doc['content']}"
+                format_context_doc(doc)
                 for doc in context_docs
             ])
             
             # Step 2: Create the prompt for the chat model
-            system_prompt = """You are a helpful assistant that answers questions based on the provided context documents. 
-            Use only the information from the context to answer questions. If the answer cannot be found in the context, 
-            say so clearly. Always cite which document and page number you're referencing in your answer."""
+            system_prompt = """You are a helpful assistant that answers questions based on the provided context documents. \
+            Use only the information from the context to answer questions. If found the answer just give the answer 
+            and do not included words (context documents) in the answer. If not found just say, always cite from
+            the information provided in the DoT documents. Also provide refernce for the answer from the documents excluding page number."""
             
-            user_prompt = f"""Context Documents:
-            {context}
-            
-            Question: {query}
-            
-            Please provide a detailed answer based on the context documents above."""
+            user_prompt = f"""Context Documents:\n{context}\n\nQuestion: {query}\n\nPlease provide a detailed answer based on the context documents above."""
             
             # Step 3: Call OpenAI's chat completion API
             if self.use_azure_openai:
-                # For Azure OpenAI, use the deployment name as the model
                 response = self.openai_chat_client.chat.completions.create(
                     model=self.azure_openai_chat_deployment,
                     messages=[
@@ -632,10 +633,9 @@ class AzureRAGPipeline:
                         {"role": "user", "content": user_prompt}
                     ],
                     max_tokens=1000,
-                    temperature=0.1  # Low temperature for more focused answers
+                    temperature=0.1
                 )
             else:
-                # For standard OpenAI, use the model name
                 response = self.openai_chat_client.chat.completions.create(
                     model=self.openai_chat_model,
                     messages=[
@@ -643,15 +643,53 @@ class AzureRAGPipeline:
                         {"role": "user", "content": user_prompt}
                     ],
                     max_tokens=1000,
-                    temperature=0.1  # Low temperature for more focused answers
+                    temperature=0.1
                 )
-            
-            # Step 4: Extract and return the generated answer
             answer = response.choices[0].message.content
-            
-            logger.info("Generated answer using RAG pipeline")
+            # Fallback detection
+            fallback_phrases = [
+                "do not contain any information relevant",
+                "If you have a specific query related to the tender or the documents provided",
+                "do not contain any information relevant to answering your question"
+            ]
+            if any(phrase in answer for phrase in fallback_phrases):
+                answer = "No relevant information found in the provided documents."
+
+            # Detect generic greetings or unclear queries
+            greeting_phrases = [
+                "could you please clarify your question",
+                "specify what information you need from the provided context documents",
+                "help me provide a detailed and accurate answer",
+                "please clarify your question",
+                "please specify your question"
+            ]
+            if any(phrase in answer.lower() for phrase in greeting_phrases) or query.strip().lower() in ["hi", "hello", "hey"]:
+                answer = "Hello! How can I help you?"
+
+            # Remove boilerplate context phrases
+            import re
+            answer = re.sub(
+                r"(?i)^(based on|according to|from|as per) (the )?(provided )?(context )?documents( provided)?(,|:)?\\s*", 
+                "", 
+                answer
+            )
+            answer = re.sub(
+                r"(?i)(mentioned|listed|found) in (the )?(context )?documents( provided)?(,|:)?", 
+                "", 
+                answer
+            )
+
+            # Clean up references section to only show document names
+            def clean_references(text):
+                refs = re.findall(r"References?:\\s*([\\s\\S]+)", text)
+                if refs:
+                    doc_lines = re.findall(r"Document: ([^\\n\\r]+\\.pdf)", refs[0])
+                    if doc_lines:
+                        ref_str = "References:\n" + "\n".join(f"- {doc}" for doc in doc_lines)
+                        text = re.sub(r"References?:[\\s\\S]+", ref_str, text)
+                return text
+            answer = clean_references(answer)
             return answer
-            
         except Exception as e:
             logger.error(f"Error generating answer: {str(e)}")
             raise

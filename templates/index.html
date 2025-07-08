@@ -215,7 +215,7 @@
         <div class="chat-messages" id="chatMessages">
             <div class="message bot">
                 <div class="message-content">
-                    Hello! I'm your Azure RAG chatbot. I can help you find information from your documents. Ask me anything!
+                    Hi, I am the DoT chatbot. How can I help you?
                 </div>
             </div>
         </div>
@@ -241,6 +241,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
@@ -255,13 +256,13 @@
             const messageContent = document.createElement('div');
             messageContent.className = 'message-content';
             
-            // Format the content with proper line breaks and lists
-            const formattedContent = content
-                .replace(/\n/g, '<br>')
-                .replace(/^(\d+\.\s+)(.+)$/gm, '<strong>$1</strong>$2')
-                .replace(/^([A-Z][a-z]+:)/gm, '<strong>$1</strong>');
-            
-            messageContent.innerHTML = formattedContent;
+            if (!isUser) {
+                // Render markdown for bot messages
+                messageContent.innerHTML = marked.parse(content);
+            } else {
+                // User messages as plain text
+                messageContent.textContent = content;
+            }
             
             if (timestamp) {
                 const timestampDiv = document.createElement('div');
