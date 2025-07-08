@@ -619,8 +619,9 @@ class AzureRAGPipeline:
             # Step 2: Create the prompt for the chat model
             system_prompt = """You are a helpful assistant that answers questions based on the provided context documents. \
             Use only the information from the context to answer questions. If found the answer just give the answer 
-            and do not included words (context documents) in the answer. If not found just say, always cite from
-            the information provided in the DoT documents. Also provide refernce for the answer from the documents excluding page number."""
+            and do not included words (context documents) in the answer. If not found the it means the user's query
+            is not related to the documents then simply say, always cite from the information provided in the DoT documents. 
+            Also provide refernce for the answer from the documents excluding page number."""
             
             user_prompt = f"""Context Documents:\n{context}\n\nQuestion: {query}\n\nPlease provide a detailed answer based on the context documents above."""
             
