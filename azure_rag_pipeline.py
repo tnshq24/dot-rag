@@ -374,7 +374,7 @@ class AzureRAGPipeline:
                 client_secret=os.getenv("CLIENT_SECRET")
             )
             
-            account_url = f"https://{os.getenv("STORAGE_ACCOUNT_NAME")}.blob.core.windows.net"
+            account_url = "https://fabricbckp.blob.core.windows.net"
             blob_service = BlobServiceClient(account_url=account_url, credential=credential)
             
             # Get container client
