@@ -52,6 +52,9 @@ from io import BytesIO
 import openai
 from openai import OpenAI, AzureOpenAI
 
+# Load environment variables from ENV.txt file
+load_dotenv("ENV.txt")
+
 # Load environment variables from .env file
 load_dotenv()
 
