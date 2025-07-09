@@ -369,12 +369,12 @@ class AzureRAGPipeline:
             
             # Authenticate using Service Principal
             credential = ClientSecretCredential(
-                tenant_id="6ab50e79-eca6-4913-87ef-d8e572838838",
-                client_id="83d57d17-cd95-4f29-b0a1-da45f225feb8",
-                client_secret="SR18Q~HkD2cDQxvd.VFux14lVGC4~21bWH0msdcS"
+                tenant_id=os.getenv("TENANT_ID"),
+                client_id=os.getenv("CLIENT_ID"),
+                client_secret=os.getenv("CLIENT_SECRET")
             )
             
-            account_url = "https://fabricbckp.blob.core.windows.net"
+            account_url = f"https://{os.getenv("STORAGE_ACCOUNT_NAME")}.blob.core.windows.net"
             blob_service = BlobServiceClient(account_url=account_url, credential=credential)
             
             # Get container client
@@ -1046,4 +1046,3 @@ async def main():
 if __name__ == "__main__":
     # Run the example
     asyncio.run(main())
-
