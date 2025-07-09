@@ -1,7 +1,8 @@
 # Environment variables
 ENV.txt
 .env
-
+dot-docs/
+uploadPDF.py
 # Python
 __pycache__/
 *.py[cod]

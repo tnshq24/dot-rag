@@ -1,7 +1,10 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session
 import asyncio
 import re
 from azure_rag_pipeline import AzureRAGPipeline
+import os
+import tempfile
+import traceback
 
 app = Flask(__name__)
 
@@ -79,21 +82,119 @@ def chat():
         
         try:
             response = loop.run_until_complete(rag_pipeline.query(question, top_k=5))
-            
+            print(response)
             # Clean and format the answer
-            clean_answer = clean_response(response['answer'])
+            # clean_answer = clean_response(response['answer'])
             
             return jsonify({
-                'answer': clean_answer,
+                'answer': response['answer'],
                 'question': question,
-                'timestamp': response.get('timestamp', '')
+                'timestamp': response.get('timestamp', ''),
+                'source_documents': response.get('source_documents', [])
             })
             
         finally:
             loop.close()
             
     except Exception as e:
-        return jsonify({'error': f'Error processing request: {str(e)}'}), 500
+        return jsonify({'error': f'Error processing request: {traceback.format_exc()}'}), 500
+
+async def upload_and_index_documents(file, tmp_path, metadata):
+    # await rag_pipeline.create_search_index()
+    blob_name = file.filename  # You may want to make this unique per user/session
+    blob_url = rag_pipeline.upload_pdf_to_blob_with_metadata(tmp_path, blob_name, metadata)
+    await rag_pipeline.index_document(blob_name)
+    print("Indexing Done")
+    return True
+
+@app.route('/upload_pdf', methods=['POST'])
+def upload_pdf():
+    if 'pdfs' not in request.files:
+        return jsonify({'error': 'No PDF files provided.'}), 400
+
+    files = request.files.getlist('pdfs')
+    if len(files) == 0 or len(files) > 3:
+        return jsonify({'error': 'You must upload between 1 and 3 PDF files.'}), 400
+
+    # Get metadata fields with new names
+    metadata = {
+        'filename': request.form.get('field1', ''),
+        'project_code': request.form.get('field2', ''),
+        'label_tag': request.form.get('field3', ''),
+    }
+
+    results = []
+    for file in files:
+        if file.filename == '':
+            results.append({'filename': '', 'status': 'No filename'})
+            continue
+        if not file.filename.lower().endswith('.pdf'):
+            results.append({'filename': file.filename, 'status': 'Not a PDF'})
+            continue
+
+        # Save to a temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+            file.save(tmp)
+            tmp_path = tmp.name
+
+        # Upload to Azure Blob Storage and index
+        try:
+            blob_name = file.filename  # You may want to make this unique per user/session
+
+            # Index the document with metadata
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(upload_and_index_documents(file=file, tmp_path=tmp_path, metadata=metadata))
+            loop.close()
+            results.append({'filename': file.filename, 'status': 'Uploaded and indexed'})
+        except Exception as e:
+            results.append({'filename': file.filename, 'status': f'Error: {str(e)}'})
+        finally:
+            os.remove(tmp_path)
+
+    return jsonify({'results': results, 'metadata': metadata})
+
+@app.route('/view_pdf/<blob_name>')
+def view_pdf(blob_name):
+    """Serve PDF files with proper content type for viewing in browser"""
+    try:
+        if not rag_pipeline:
+            return jsonify({'error': 'RAG pipeline not initialized'}), 500
+        
+        print(f"Attempting to view PDF: {blob_name}")
+        
+        # Get the blob client for the PDF file
+        blob_client = rag_pipeline.blob_service_client.get_blob_client(
+            container=rag_pipeline.blob_container_name,
+            blob=blob_name
+        )
+        
+        # Check if blob exists
+        try:
+            blob_properties = blob_client.get_blob_properties()
+            print(f"Found blob: {blob_name}, size: {blob_properties.size} bytes")
+        except Exception as e:
+            print(f"Blob not found: {blob_name}, error: {str(e)}")
+            return jsonify({'error': f'PDF file "{blob_name}" not found'}), 404
+        
+        # Download the blob content
+        blob_data = blob_client.download_blob()
+        
+        # Return the PDF with proper content type
+        from flask import Response
+        response = Response(
+            blob_data.readall(),
+            mimetype='application/pdf',
+            headers={'Content-Disposition': f'inline; filename="{blob_name}"'}
+        )
+        
+        print(f"Successfully serving PDF: {blob_name}")
+        return response
+        
+    except Exception as e:
+        print(f"Error viewing PDF {blob_name}: {str(e)}")
+        return jsonify({'error': f'Error viewing PDF: {str(e)}'}), 500
 
 @app.route('/health')
 def health():
@@ -108,4 +209,4 @@ else:
 
 if __name__ == '__main__':
     # Run the Flask app
-    app.run(debug=True, host='0.0.0.0', port=5000) 
+    app.run(debug=True, host='0.0.0.0', port=8000) 

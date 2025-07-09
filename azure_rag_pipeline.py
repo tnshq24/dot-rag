@@ -5,6 +5,8 @@
 import os
 import json
 import logging
+import base64
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import asyncio
@@ -12,13 +14,18 @@ from dotenv import load_dotenv
 
 # Azure SDK imports
 from azure.storage.blob import BlobServiceClient, BlobClient
+from azure.identity import ClientSecretCredential
 from azure.search.documents import SearchClient
-from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes import SearchIndexClient, SearchIndexerClient
 from azure.search.documents.models import VectorizedQuery
 from azure.search.documents.indexes.models import (
     SearchIndex,
     SearchField,
+    OcrSkill,
     SearchFieldDataType,
+    SearchIndexerDataSourceConnection,
+    InputFieldMappingEntry, 
+    OutputFieldMappingEntry,
     VectorSearch,
     VectorSearchProfile,
     VectorSearchAlgorithmConfiguration,
@@ -26,8 +33,17 @@ from azure.search.documents.indexes.models import (
     VectorSearchAlgorithmKind,
     SearchableField,
     SimpleField,
-    ComplexField
+    ComplexField,
+    SearchIndexerSkillset,
+    SearchIndexer,
+    IndexingParameters,
+    SearchIndexerDataSourceType
 )
+
+from azure.ai.documentintelligence import DocumentIntelligenceClient
+from azure.ai.documentintelligence.models import AnalyzeResult
+from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+
 from azure.core.credentials import AzureKeyCredential
 
 # PDF processing imports
@@ -36,8 +52,8 @@ from io import BytesIO
 import openai
 from openai import OpenAI, AzureOpenAI
 
-# Load environment variables from ENV.txt file
-load_dotenv("ENV.txt")
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging to track pipeline operations
 logging.basicConfig(level=logging.INFO)
@@ -79,14 +95,17 @@ class AzureRAGPipeline:
         # Azure OpenAI specific configuration
         self.azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         self.azure_openai_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+
+        self.azure_document_intelligence_endpoint = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT")
+        self.azure_document_intelligence_api_key = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_API_KEY")
+
         self.azure_openai_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
         self.azure_openai_embedding_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
         self.azure_openai_chat_deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
         self.use_azure_openai = os.getenv("USE_AZURE_OPENAI", "false").lower() == "true"
         
         # Set the search index name where we'll store our document vectors
-        # Use a different name to avoid conflicts with existing indexes
-        self.index_name = os.getenv("AZURE_SEARCH_INDEX_NAME", "rag-documents-index")
+        self.index_name = os.getenv("AZURE_SEARCH_INDEX_NAME", "documents-index")
         
         # Initialize Azure clients
         self._initialize_clients()
@@ -100,66 +119,54 @@ class AzureRAGPipeline:
         These clients provide the interface to interact with Azure services
         """
         
-        try:
-            # Validate that required credentials are strings and not None
-            if not self.search_admin_key or not isinstance(self.search_admin_key, str):
-                raise ValueError(f"AZURE_SEARCH_ADMIN_KEY must be a non-empty string. Got: {type(self.search_admin_key)}")
-            
-            if not self.search_service_name or not isinstance(self.search_service_name, str):
-                raise ValueError(f"AZURE_SEARCH_SERVICE_NAME must be a non-empty string. Got: {type(self.search_service_name)}")
-            
-            if not self.blob_connection_string or not isinstance(self.blob_connection_string, str):
-                raise ValueError(f"AZURE_STORAGE_CONNECTION_STRING must be a non-empty string. Got: {type(self.blob_connection_string)}")
-            
-            # Initialize Azure AI Search clients
-            # SearchIndexClient manages the search index structure
-            self.search_index_client = SearchIndexClient(
-                endpoint=self.search_endpoint,
-                credential=AzureKeyCredential(self.search_admin_key)
+        # Initialize Azure AI Search clients
+        # SearchIndexClient manages the search index structure
+        self.search_index_client = SearchIndexClient(
+            endpoint=self.search_endpoint,
+            credential=AzureKeyCredential(self.search_admin_key)
+        )
+
+        # # Initialize Azure AI Search clients
+        # # SearchIndexerClient manages the search index structure
+        # self.search_indexer_client = SearchIndexerClient(
+        #     endpoint=self.search_endpoint,
+        #     credential=AzureKeyCredential(self.search_admin_key)
+        # )
+        
+        # SearchClient performs search operations on the index
+        self.search_client = SearchClient(
+            endpoint=self.search_endpoint,
+            index_name=self.index_name,
+            credential=AzureKeyCredential(self.search_admin_key)
+        )
+
+        # Initialize Document Intelligence client
+        self.document_intelligence_client = DocumentIntelligenceClient(
+            endpoint=self.azure_document_intelligence_endpoint,
+            credential=AzureKeyCredential(self.azure_document_intelligence_api_key)
+        )
+        
+        # Initialize Azure Blob Storage client
+        # This client manages file storage and retrieval
+        self.blob_service_client = BlobServiceClient.from_connection_string(
+            self.blob_connection_string
+        )
+
+        
+        # Initialize OpenAI client (supports both OpenAI and Azure OpenAI)
+        if self.use_azure_openai:
+            # Initialize Azure OpenAI client using the correct Azure format
+            self.openai_client = AzureOpenAI(
+                api_key=self.azure_openai_api_key,
+                azure_endpoint=self.azure_openai_endpoint,
+                api_version=self.azure_openai_api_version
             )
-            
-            # SearchClient performs search operations on the index
-            self.search_client = SearchClient(
-                endpoint=self.search_endpoint,
-                index_name=self.index_name,
-                credential=AzureKeyCredential(self.search_admin_key)
-            )
-            
-            # Initialize Azure Blob Storage client
-            # This client manages file storage and retrieval
-            self.blob_service_client = BlobServiceClient.from_connection_string(
-                self.blob_connection_string
-            )
-            
-            # Initialize OpenAI client (supports both OpenAI and Azure OpenAI)
-            if self.use_azure_openai:
-                # Validate Azure OpenAI credentials
-                if not self.azure_openai_api_key or not isinstance(self.azure_openai_api_key, str):
-                    raise ValueError(f"AZURE_OPENAI_API_KEY must be a non-empty string. Got: {type(self.azure_openai_api_key)}")
-                
-                if not self.azure_openai_endpoint or not isinstance(self.azure_openai_endpoint, str):
-                    raise ValueError(f"AZURE_OPENAI_ENDPOINT must be a non-empty string. Got: {type(self.azure_openai_endpoint)}")
-                
-                # Initialize Azure OpenAI client using the correct Azure format
-                self.openai_client = AzureOpenAI(
-                    api_key=self.azure_openai_api_key,
-                    azure_endpoint=self.azure_openai_endpoint,
-                    api_version=self.azure_openai_api_version
-                )
-                # Use the same client for both embeddings and chat
-                self.openai_chat_client = self.openai_client
-            else:
-                # Validate OpenAI credentials
-                if not self.openai_api_key or not isinstance(self.openai_api_key, str):
-                    raise ValueError(f"OPENAI_API_KEY must be a non-empty string. Got: {type(self.openai_api_key)}")
-                
-                # Initialize standard OpenAI client
-                self.openai_client = OpenAI(api_key=self.openai_api_key)
-                self.openai_chat_client = self.openai_client
-                
-        except Exception as e:
-            logger.error(f"Error initializing clients: {str(e)}")
-            raise
+            # Use the same client for both embeddings and chat
+            self.openai_chat_client = self.openai_client
+        else:
+            # Initialize standard OpenAI client
+            self.openai_client = OpenAI(api_key=self.openai_api_key)
+            self.openai_chat_client = self.openai_client
     
     def _validate_configuration(self):
         """
@@ -183,17 +190,6 @@ class AzureRAGPipeline:
         else:
             required_vars.append("OPENAI_API_KEY")
         
-        # Debug: Print all environment variables to see what's loaded
-        logger.info("Environment variables loaded:")
-        for var in required_vars:
-            value = os.getenv(var)
-            if value:
-                # Mask sensitive values for security
-                masked_value = value[:4] + "..." + value[-4:] if len(value) > 8 else "***"
-                logger.info(f"  {var}: {masked_value}")
-            else:
-                logger.warning(f"  {var}: NOT SET")
-        
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {missing_vars}")
@@ -205,16 +201,6 @@ class AzureRAGPipeline:
         Create the Azure AI Search index with vector search capabilities
         This index will store document chunks and their vector embeddings
         """
-        
-        # First, check if the index already exists and delete it to avoid conflicts
-        try:
-            existing_index = self.search_index_client.get_index(self.index_name)
-            logger.info(f"Found existing index '{self.index_name}', deleting it...")
-            self.search_index_client.delete_index(self.index_name)
-            logger.info(f"Deleted existing index '{self.index_name}'")
-        except Exception:
-            # Index doesn't exist, which is fine
-            logger.info(f"Index '{self.index_name}' doesn't exist, will create new one")
         
         # Define the search index fields
         # These fields define the structure of documents in our search index
@@ -236,7 +222,7 @@ class AzureRAGPipeline:
             
             # Vector embedding of the content (1536 dimensions for Ada model)
             SearchField(
-                name="contentVector",
+                name="content_vector",
                 type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
                 searchable=True,
                 vector_search_dimensions=1536,  # Ada embedding model dimension
@@ -267,7 +253,7 @@ class AzureRAGPipeline:
             ]
         )
         
-        # Create the search index with minimal configuration to avoid semantic search issues
+        # Create the search index
         index = SearchIndex(
             name=self.index_name,
             fields=fields,
@@ -275,13 +261,53 @@ class AzureRAGPipeline:
         )
         
         try:
-            # Create the index in Azure AI Search
-            result = self.search_index_client.create_index(index)
+            # Create or update the index in Azure AI Search
+            result = self.search_index_client.create_or_update_index(index)
+            # ocr_skill = OcrSkill(
+            #     name="ocrSkill",
+            #     description="Extract text (OCR)",
+            #     context="/document",
+            #     default_language_code="en",
+            #     inputs=[
+            #         InputFieldMappingEntry(name="image", source="/document/content")
+            #     ],
+            #     outputs=[
+            #         OutputFieldMappingEntry(name="text", target_name="content")
+            #     ]
+            # )
+            # skillset = SearchIndexerSkillset(
+            #     name="ocr-skillset",
+            #     description="OCR skillset for scanned PDFs",
+            #     skills=[ocr_skill]
+            # )
+            # self.search_indexer_client.create_or_update_skillset(skillset)
+
+            # data_source = SearchIndexerDataSourceConnection(
+            #     name="fabricbckp",
+            #     type=SearchIndexerDataSourceType.AZURE_BLOB,
+            #     connection_string=self.blob_connection_string,
+            #     container={"name": self.blob_container_name},
+            #     description="Blob container with PDFs"
+            # )
+
+            # self.search_indexer_client.create_or_update_data_source_connection(data_source)
+            # indexer = SearchIndexer(
+            #     name=self.index_name,
+            #     data_source_name="fabricbckp",
+            #     target_index_name=self.index_name,
+            #     skillset_name="ocr-skillset",
+            #     parameters=IndexingParameters(configuration={"parsingMode": "default"})
+            # )
+            # self.search_indexer_client.create_or_update_indexer(indexer)
+            # self.search_indexer_client.run_indexer(self.search_client)
+
             logger.info(f"Search index '{self.index_name}' created successfully")
             return result
         except Exception as e:
             logger.error(f"Error creating search index: {str(e)}")
             raise
+
+
     
     def upload_pdf_to_blob(self, file_path: str, blob_name: str) -> str:
         """
@@ -295,6 +321,7 @@ class AzureRAGPipeline:
             URL of the uploaded blob
         """
         try:
+            
             # Get a reference to the blob client
             blob_client = self.blob_service_client.get_blob_client(
                 container=self.blob_container_name,
@@ -311,7 +338,76 @@ class AzureRAGPipeline:
         except Exception as e:
             logger.error(f"Error uploading PDF to blob storage: {str(e)}")
             raise
+
+    def upload_pdf_to_blob_with_metadata(self, file_path: str, blob_name: str, metadata: dict) -> str:
+        """
+        Upload a PDF file to Azure Blob Storage with metadata and custom path structure
+        
+        Args:
+            file_path: Local path to the PDF file
+            blob_name: Original filename
+            metadata: Dictionary containing filename, project_code, and label_tag
+            
+        Returns:
+            URL of the uploaded blob
+        """
+        try:
+            from azure.storage.blob import BlobServiceClient
+            from azure.identity import ClientSecretCredential
+            
+            # Extract metadata
+            filename = metadata.get('filename', '')
+            project_code = metadata.get('project_code', '')
+            label_tag = metadata.get('label_tag', '')
+            
+            # Use original filename if metadata filename is empty
+            if not filename:
+                filename = blob_name
+            
+            # Create blob name with custom path structure
+            blob_name_with_path = f"Categories/{project_code}/{project_code}_{filename}.pdf"
+            
+            # Authenticate using Service Principal
+            credential = ClientSecretCredential(
+                tenant_id="6ab50e79-eca6-4913-87ef-d8e572838838",
+                client_id="83d57d17-cd95-4f29-b0a1-da45f225feb8",
+                client_secret="SR18Q~HkD2cDQxvd.VFux14lVGC4~21bWH0msdcS"
+            )
+            
+            account_url = "https://fabricbckp.blob.core.windows.net"
+            blob_service = BlobServiceClient(account_url=account_url, credential=credential)
+            
+            # Get container client
+            container = blob_service.get_container_client("dot-docs")
+            
+            # Read file data
+            with open(file_path, "rb") as file_data:
+                file_content = file_data.read()
+            
+            # Upload blob with metadata
+            blob_metadata = {
+                'filename': filename,
+                'project_code': project_code,
+                'label_tag': label_tag,
+                'upload_timestamp': datetime.now().isoformat()
+            }
+            
+            # Upload the file to blob storage with metadata
+            container.upload_blob(
+                name=blob_name_with_path, 
+                data=file_content, 
+                overwrite=True,
+                metadata=blob_metadata
+            )
+            
+            logger.info(f"PDF uploaded to blob storage with metadata: {blob_name_with_path}")
+            return f"{account_url}/dot-docs/{blob_name_with_path}"
+            
+        except Exception as e:
+            logger.error(f"Error uploading PDF to blob storage with metadata: {str(e)}")
+            raise
     
+
     def extract_text_from_pdf_blob(self, blob_name: str) -> List[Dict[str, Any]]:
         """
         Extract text content from a PDF stored in Azure Blob Storage
@@ -350,6 +446,9 @@ class AzureRAGPipeline:
                         "content": text.strip(),
                         "filename": blob_name
                     })
+
+            if len(pages_content)==0:
+                pages_content = self.extract_text_from_pdf_blob_v2(blob_name=blob_name)
             
             logger.info(f"Extracted text from {len(pages_content)} pages")
             return pages_content
@@ -357,6 +456,68 @@ class AzureRAGPipeline:
         except Exception as e:
             logger.error(f"Error extracting text from PDF: {str(e)}")
             raise
+
+
+    def extract_text_from_pdf_blob_v2(self, blob_name: str) -> List[Dict[str, Any]]:
+        """
+        Extract text content from a PDF stored in Azure Blob Storage
+        
+        Args:
+            blob_name: Name of the PDF blob in storage
+            
+        Returns:
+            List of dictionaries containing page text and metadata
+        """
+        try:
+            # Get the blob client for the PDF file
+            blob_client = self.blob_service_client.get_blob_client(
+                container=self.blob_container_name,
+                blob=blob_name
+            )
+            
+            pdf_reader = self.document_intelligence_client.begin_analyze_document(
+                "prebuilt-layout", AnalyzeDocumentRequest(url_source=blob_client.url)
+                )
+
+            pdf_reader = pdf_reader.result()
+            pages_content = []
+            for page in pdf_reader.pages:
+                page_number = page.page_number
+                text = "\n"
+                if page.lines:
+                    for line in page.lines:
+                        text = text + "\n" + line.content
+
+                if text.strip():
+                    pages_content.append({
+                        "page_number": page_number,
+                        "content": text.strip(),
+                        "filename": blob_name
+                    })
+
+            if pdf_reader.tables:
+                for table in pdf_reader.tables:
+                    if table.bounding_regions:
+                        for region in table.bounding_regions:
+                            page_number = region.page_number
+                            content = ""
+                            for cell in table.cells:
+                                content = content + "\t" + cell.content
+
+                            if content.strip():
+                                pages_content.append({
+                                    "page_number": page_number,
+                                    "content": content.strip(),
+                                    "filename": blob_name
+                                })
+            
+            logger.info(f"Extracted text from {len(pages_content)} pages")
+            return pages_content
+            
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {str(e)}")
+            raise
+
     
     def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
         """
@@ -514,7 +675,7 @@ class AzureRAGPipeline:
                         "content": chunk["content"],
                         "page_number": chunk["page_number"],
                         "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "contentVector": embedding
+                        "content_vector": embedding
                     }
                     documents.append(doc)
                 
@@ -543,6 +704,44 @@ class AzureRAGPipeline:
             logger.error(f"Error indexing document: {str(e)}")
             raise
     
+    def get_blob_url(self, blob_name: str) -> str:
+        """
+        Get the URL for a blob in Azure Blob Storage
+        
+        Args:
+            blob_name: Name of the blob file
+            
+        Returns:
+            URL to access the blob
+        """
+        try:
+            # Get the blob client for the PDF file
+            blob_client = self.blob_service_client.get_blob_client(
+                container=self.blob_container_name,
+                blob=blob_name
+            )
+            return blob_client.url
+        except Exception as e:
+            logger.error(f"Error getting blob URL for {blob_name}: {str(e)}")
+            return None
+
+    def get_blob_view_url(self, blob_name: str) -> str:
+        """
+        Get a URL for viewing a blob in the browser using Flask route
+        
+        Args:
+            blob_name: Name of the blob file
+            
+        Returns:
+            URL to view the blob in browser
+        """
+        try:
+            # Return the Flask route URL for viewing PDFs
+            return f"/view_pdf/{blob_name}"
+        except Exception as e:
+            logger.error(f"Error getting blob view URL for {blob_name}: {str(e)}")
+            return None
+
     async def search_similar_documents(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
         Search for documents similar to the query using vector similarity
@@ -552,7 +751,7 @@ class AzureRAGPipeline:
             top_k: Number of similar documents to return
             
         Returns:
-            List of similar documents with scores
+            List of similar documents with scores and blob URLs
         """
         try:
             # Step 1: Generate embedding for the search query
@@ -563,24 +762,28 @@ class AzureRAGPipeline:
             vector_query = VectorizedQuery(
                 vector=query_vector,
                 k_nearest_neighbors=top_k,
-                fields="contentVector"
+                fields="content_vector"
             )
             
             # Step 3: Execute the search
             search_results = self.search_client.search(
-                search_text=None,  # We're doing pure vector search
-                vector_queries=[vector_query],
+                search_text=[query],  # We're doing pure vector search
+                #vector_queries=[vector_query],
                 top=top_k
             )
             
-            # Step 4: Process and return results
+            # Step 4: Process and return results with blob URLs
             results = []
             for result in search_results:
+                download_url = self.get_blob_url(result["filename"])
+                view_url = self.get_blob_view_url(result["filename"])
                 doc = {
                     "content": result["content"],
-                    "filepath": result.get("filepath", "N/A"),
-                    "page_number": result.get("page_number", "N/A"),
-                    "score": result["@search.score"]
+                    "filename": result["filename"],
+                    "page_number": result["page_number"],
+                    "score": result["@search.score"],
+                    "download_url": download_url,
+                    "view_url": view_url
                 }
                 results.append(doc)
             
@@ -599,34 +802,32 @@ class AzureRAGPipeline:
         Args:
             query: User's question
             context_docs: Retrieved documents for context
-        
+            
         Returns:
             Generated answer
         """
         try:
             # Step 1: Prepare the context from retrieved documents
-            def format_context_doc(doc):
-                page = doc.get('page_number', None)
-                if page and page != 'N/A':
-                    return f"Document: {doc['filepath']} (Page {page})\n{doc['content']}"
-                else:
-                    return f"Document: {doc['filepath']}\n{doc['content']}"
             context = "\n\n".join([
-                format_context_doc(doc)
+                f"Document: {doc['filename']} (Page {doc['page_number']})\n{doc['content']}"
                 for doc in context_docs
             ])
             
             # Step 2: Create the prompt for the chat model
-            system_prompt = """You are a helpful assistant that answers questions based on the provided context documents. \
-            Use only the information from the context to answer questions. If found the answer just give the answer 
-            and do not included words (context documents) in the answer. If not found the it means the user's query
-            is not related to the documents then simply say, always cite from the information provided in the DoT documents. 
-            Also provide refernce for the answer from the documents excluding page number."""
+            system_prompt = """You are a helpful assistant that answers questions based on the provided context documents. 
+            Use only the information from the context to answer questions. If the answer cannot be found in the context, 
+            say so clearly. Always cite which document and page number you're referencing in your answer."""
             
-            user_prompt = f"""Context Documents:\n{context}\n\nQuestion: {query}\n\nPlease provide a detailed answer based on the context documents above."""
+            user_prompt = f"""Context Documents:
+            {context}
+            
+            Question: {query}
+            
+            Please provide a detailed answer based on the context documents above."""
             
             # Step 3: Call OpenAI's chat completion API
             if self.use_azure_openai:
+                # For Azure OpenAI, use the deployment name as the model
                 response = self.openai_chat_client.chat.completions.create(
                     model=self.azure_openai_chat_deployment,
                     messages=[
@@ -634,9 +835,10 @@ class AzureRAGPipeline:
                         {"role": "user", "content": user_prompt}
                     ],
                     max_tokens=1000,
-                    temperature=0.1
+                    temperature=0.1  # Low temperature for more focused answers
                 )
             else:
+                # For standard OpenAI, use the model name
                 response = self.openai_chat_client.chat.completions.create(
                     model=self.openai_chat_model,
                     messages=[
@@ -644,53 +846,15 @@ class AzureRAGPipeline:
                         {"role": "user", "content": user_prompt}
                     ],
                     max_tokens=1000,
-                    temperature=0.1
+                    temperature=0.1  # Low temperature for more focused answers
                 )
+            
+            # Step 4: Extract and return the generated answer
             answer = response.choices[0].message.content
-            # Fallback detection
-            fallback_phrases = [
-                "do not contain any information relevant",
-                "If you have a specific query related to the tender or the documents provided",
-                "do not contain any information relevant to answering your question"
-            ]
-            if any(phrase in answer for phrase in fallback_phrases):
-                answer = "No relevant information found in the provided documents."
-
-            # Detect generic greetings or unclear queries
-            greeting_phrases = [
-                "could you please clarify your question",
-                "specify what information you need from the provided context documents",
-                "help me provide a detailed and accurate answer",
-                "please clarify your question",
-                "please specify your question"
-            ]
-            if any(phrase in answer.lower() for phrase in greeting_phrases) or query.strip().lower() in ["hi", "hello", "hey"]:
-                answer = "Hello! How can I help you?"
-
-            # Remove boilerplate context phrases
-            import re
-            answer = re.sub(
-                r"(?i)^(based on|according to|from|as per) (the )?(provided )?(context )?documents( provided)?(,|:)?\\s*", 
-                "", 
-                answer
-            )
-            answer = re.sub(
-                r"(?i)(mentioned|listed|found) in (the )?(context )?documents( provided)?(,|:)?", 
-                "", 
-                answer
-            )
-
-            # Clean up references section to only show document names
-            def clean_references(text):
-                refs = re.findall(r"References?:\\s*([\\s\\S]+)", text)
-                if refs:
-                    doc_lines = re.findall(r"Document: ([^\\n\\r]+\\.pdf)", refs[0])
-                    if doc_lines:
-                        ref_str = "References:\n" + "\n".join(f"- {doc}" for doc in doc_lines)
-                        text = re.sub(r"References?:[\\s\\S]+", ref_str, text)
-                return text
-            answer = clean_references(answer)
+            
+            logger.info("Generated answer using RAG pipeline")
             return answer
+            
         except Exception as e:
             logger.error(f"Error generating answer: {str(e)}")
             raise
@@ -711,14 +875,18 @@ class AzureRAGPipeline:
             logger.info(f"Processing query: {question}")
             relevant_docs = await self.search_similar_documents(question, top_k)
             
-            # Step 2: Generate answer using retrieved documents
-            answer = await self.generate_answer(question, relevant_docs)
+            # Step 2: Check if the query is relevant to the documents
+            is_relevant = self._is_query_relevant(question, relevant_docs)
             
-            # Step 3: Return complete response
+            # Step 3: Generate answer using retrieved documents
+            answer = await self.generate_answer(question, relevant_docs, is_relevant)
+            
+            # Step 4: Return complete response with relevance flag
             response = {
                 "question": question,
                 "answer": answer,
-                "source_documents": relevant_docs,
+                "source_documents": relevant_docs if is_relevant else [],
+                "is_relevant": is_relevant,
                 "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
             }
             
@@ -727,6 +895,114 @@ class AzureRAGPipeline:
             
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}")
+            raise
+
+    def _is_query_relevant(self, question: str, relevant_docs: List[Dict[str, Any]]) -> bool:
+        """
+        Determine if the query is relevant to the uploaded documents
+        
+        Args:
+            question: User's question
+            relevant_docs: Retrieved documents
+            
+        Returns:
+            True if query is relevant, False otherwise
+        """
+        # Define irrelevant query patterns
+        irrelevant_patterns = [
+            r'\b(hi|hello|hey|good morning|good afternoon|good evening)\b',
+            r'\b(how are you|how do you do)\b',
+            r'\b(what is your name|who are you)\b',
+            r'\b(thank you|thanks)\b',
+            r'\b(bye|goodbye|see you)\b',
+            r'\b(what time|what day|what date)\b',
+            r'\b(weather|temperature)\b',
+            r'\b(joke|funny|humor)\b',
+            r'\b(help|support)\b',
+            r'\b(menu|options)\b'
+        ]
+        
+        # Check if query matches irrelevant patterns
+        question_lower = question.lower().strip()
+        for pattern in irrelevant_patterns:
+            if re.search(pattern, question_lower):
+                return False
+        
+        # Check if we have relevant documents with good scores
+        if not relevant_docs:
+            return False
+        
+        # Check if any document has a good relevance score
+        max_score = max(doc.get('score', 0) for doc in relevant_docs)
+        return max_score > 0.3  # Adjust threshold as needed
+
+    async def generate_answer(self, query: str, context_docs: List[Dict[str, Any]], is_relevant: bool = True) -> str:
+        """
+        Generate an answer using OpenAI's chat model and retrieved context
+        Supports both standard OpenAI and Azure OpenAI
+        
+        Args:
+            query: User's question
+            context_docs: Retrieved documents for context
+            is_relevant: Whether the query is relevant to documents
+            
+        Returns:
+            Generated answer
+        """
+        try:
+            if not is_relevant:
+                return "I'm here to help you with questions about the uploaded documents. Please ask me something related to the PDF files you've uploaded, such as questions about their content, summaries, or specific information from the documents."
+            
+            # Step 1: Prepare the context from retrieved documents
+            context = "\n\n".join([
+                f"Document: {doc['filename']} (Page {doc['page_number']})\n{doc['content']}"
+                for doc in context_docs
+            ])
+            
+            # Step 2: Create the prompt for the chat model
+            system_prompt = """You are a helpful assistant that answers questions based on the provided context documents. 
+            Use only the information from the context to answer questions. If the answer cannot be found in the context, 
+            say so clearly. Always cite which document and page number you're referencing in your answer."""
+            
+            user_prompt = f"""Context Documents:
+            {context}
+            
+            Question: {query}
+            
+            Please provide a detailed answer based on the context documents above."""
+            
+            # Step 3: Call OpenAI's chat completion API
+            if self.use_azure_openai:
+                # For Azure OpenAI, use the deployment name as the model
+                response = self.openai_chat_client.chat.completions.create(
+                    model=self.azure_openai_chat_deployment,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_tokens=1000,
+                    temperature=0.1  # Low temperature for more focused answers
+                )
+            else:
+                # For standard OpenAI, use the model name
+                response = self.openai_chat_client.chat.completions.create(
+                    model=self.openai_chat_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_tokens=1000,
+                    temperature=0.1  # Low temperature for more focused answers
+                )
+            
+            # Step 4: Extract and return the generated answer
+            answer = response.choices[0].message.content
+            
+            logger.info("Generated answer using RAG pipeline")
+            return answer
+            
+        except Exception as e:
+            logger.error(f"Error generating answer: {str(e)}")
             raise
 
 # Example usage and testing functions
@@ -739,17 +1015,35 @@ async def main():
     # Initialize the RAG pipeline
     rag_pipeline = AzureRAGPipeline()
     
-    # Step 1: Create the search index (optional, skip if already created)
+    # Step 1: Create the search index
     # print("Creating search index...")
     # await rag_pipeline.create_search_index()
     
-    # Step 2: Query the system
-    test_question = "find me the village name of district bastar and sub district kondagaon"
-    print(f"\n❓ Test Question: {test_question}")
-    print("🔍 Querying the system...")
-    response = await rag_pipeline.query(test_question, top_k=5)
-    print(f"\n🤖 Answer:\n   {response['answer']}")
+
+    # pdf_path = "502-UCV-Amendment_in_agreement_Bihar2.pdf"
+    # blob_name = pdf_path
+    # rag_pipeline.upload_pdf_to_blob(pdf_path, blob_name)
+    # await rag_pipeline.index_document(blob_name)
+    
+    # Step 2: Upload a PDF to blob storage (replace with your PDF path)
+    for file_name in os.listdir("dot-docs"):
+        print(file_name)
+        pdf_path = f"dot-docs/{file_name}"
+        blob_name = file_name
+        rag_pipeline.upload_pdf_to_blob(pdf_path, blob_name)
+    
+        # Step 3: Index the document
+        print("Indexing document...")
+        await rag_pipeline.index_document(blob_name)
+    
+    # # Step 4: Query the system
+    # print("Querying the system...")
+    # # response = await rag_pipeline.query("What is the main topic of the document?")
+    # response = await rag_pipeline.query("Summarize 502-UCV-Amendment_in_agreement_Bihar2 ")
+    # print(f"Answer: {response['answer']}")
+    # print(f"Sources: {len(response['source_documents'])} documents")
 
 if __name__ == "__main__":
     # Run the example
     asyncio.run(main())
+

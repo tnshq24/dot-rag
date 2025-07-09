@@ -189,6 +189,81 @@
             text-align: right;
         }
 
+        .reference-documents {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .reference-documents h4 {
+            margin-bottom: 10px;
+            color: #667eea;
+            font-size: 16px;
+        }
+
+        .reference-document {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .reference-document-header {
+            display: flex;
+            justify-content: flex-start;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .reference-document-title {
+            font-weight: bold;
+            color: #333;
+        }
+
+
+
+        .reference-document-content {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.4;
+            margin-bottom: 8px;
+        }
+
+        .reference-document-links {
+            display: flex;
+            gap: 10px;
+        }
+
+        .reference-link {
+            padding: 5px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .reference-link.view {
+            background: #667eea;
+            color: white;
+        }
+
+        .reference-link.view:hover {
+            background: #5a6fd8;
+        }
+
+        .reference-link.download {
+            background: #28a745;
+            color: white;
+        }
+
+        .reference-link.download:hover {
+            background: #218838;
+        }
+
         @media (max-width: 768px) {
             .chat-container {
                 height: 90vh;
@@ -209,9 +284,35 @@
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            🤖 Azure RAG Chatbot
+            <span style="font-size: 1.5em;">📚 Azure RAG Chatbot</span>
+            <button id="openUploadModal" style="float:right; margin-top:-5px; background:#fff; color:#764ba2; border:1px solid #764ba2; border-radius:8px; padding:6px 16px; font-size:15px; cursor:pointer;">Upload PDFs</button>
         </div>
         
+        <!-- Upload Modal -->
+        <div id="uploadModal" class="modal" style="display:none; position:fixed; z-index:1000; left:0; top:0; width:100vw; height:100vh; overflow:auto; background:rgba(0,0,0,0.4);">
+            <div class="modal-content" style="background:#fff; margin:5% auto; padding:30px 30px 20px 30px; border-radius:16px; max-width:400px; position:relative; box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+                <span id="closeUploadModal" style="position:absolute; top:10px; right:18px; font-size:28px; font-weight:bold; color:#764ba2; cursor:pointer;">&times;</span>
+                <h2 style="margin-bottom:18px; color:#764ba2; text-align:center;">Enter Details</h2>
+                <form id="uploadForm">
+                    <label for="pdfs">Select up to 3 PDF files:</label><br>
+                    <input type="file" id="pdfs" name="pdfs" accept="application/pdf" multiple required style="margin-bottom:12px;"/><br>
+                    <label for="field1">Filename:</label><br>
+                    <input type="text" id="field1" name="field1" style="width:100%; margin-bottom:8px;"/><br>
+                    <label for="field2">Project Code:</label><br>
+                    <input type="text" id="field2" name="field2" style="width:100%; margin-bottom:8px;"/><br>
+                    <label for="field3">Label/Tag:</label><br>
+                    <input type="text" id="field3" name="field3" style="width:100%; margin-bottom:16px;"/><br>
+                    <button type="submit" id="uploadBtn" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:#fff; border:none; border-radius:8px; padding:10px 24px; font-size:16px; cursor:pointer; width:100%;">Upload</button>
+                </form>
+                <div id="progressBarContainer" style="width:100%; background:#eee; border-radius:8px; margin-top:10px; display:none;">
+                    <div id="progressBar" style="width:0%; height:10px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); border-radius:8px;"></div>
+                </div>
+                <div id="uploadStatus" style="margin-top:18px; color:#333; font-size:15px;"></div>
+                <button id="closeAfterUpload" style="display:none; margin-top:16px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:#fff; border:none; border-radius:8px; padding:10px 24px; font-size:16px; cursor:pointer; width:100%;">Close</button>
+            </div>
+        </div>
+        <!-- End Upload Modal -->
+
         <div class="chat-messages" id="chatMessages">
             <div class="message bot">
                 <div class="message-content">
@@ -249,7 +350,7 @@
         const chatForm = document.getElementById('chatForm');
         const loading = document.getElementById('loading');
 
-        function addMessage(content, isUser = false, timestamp = null) {
+        function addMessage(content, isUser = false, timestamp = null, sourceDocuments = null, isRelevant = true) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
             
@@ -259,6 +360,101 @@
             if (!isUser) {
                 // Render markdown for bot messages
                 messageContent.innerHTML = marked.parse(content);
+                
+                // Add reference documents if available and if the answer doesn't indicate no relevant information found
+                const noInfoPatterns = [
+                    'The context documents provided do not contain any information',
+                    'The context documents provided do not include any information',
+                    'no information found',
+                    'cannot be found in the context',
+                    'no relevant information'
+                ];
+                
+                const hasNoInfo = noInfoPatterns.some(pattern => 
+                    content.toLowerCase().includes(pattern.toLowerCase())
+                );
+                
+                console.log('Content:', content);
+                console.log('Has no info:', hasNoInfo);
+                console.log('Source documents:', sourceDocuments);
+                console.log('Is relevant:', isRelevant);
+                
+                if (sourceDocuments && sourceDocuments.length > 0 && !hasNoInfo && isRelevant) {
+                    const referenceDiv = document.createElement('div');
+                    referenceDiv.className = 'reference-documents';
+                    
+                    const referenceHeader = document.createElement('h4');
+                    referenceHeader.textContent = '📚 Reference Documents';
+                    referenceDiv.appendChild(referenceHeader);
+                    
+                    // Find the document with the highest confidence score across all documents
+                    let highestScoreDoc = null;
+                    sourceDocuments.forEach((doc) => {
+                        if (!highestScoreDoc || doc.score > highestScoreDoc.score) {
+                            highestScoreDoc = {
+                                filename: doc.filename,
+                                view_url: doc.view_url,
+                                download_url: doc.download_url,
+                                page_number: doc.page_number,
+                                score: doc.score
+                            };
+                        }
+                    });
+                    
+                    console.log('Highest score document:', highestScoreDoc);
+                    
+                    // Display only the highest confidence document
+                    if (highestScoreDoc.score > 0.85) {
+                        const docDiv = document.createElement('div');
+                        docDiv.className = 'reference-document';
+                        
+                        const headerDiv = document.createElement('div');
+                        headerDiv.className = 'reference-document-header';
+                        
+                        const titleSpan = document.createElement('span');
+                        titleSpan.className = 'reference-document-title';
+                        titleSpan.textContent = `${highestScoreDoc.filename}`;
+                        
+                        headerDiv.appendChild(titleSpan);
+                        
+                        const contentDiv = document.createElement('div');
+                        contentDiv.className = 'reference-document-content';
+                        contentDiv.textContent = 'Referenced from this document';
+                        
+                        const linksDiv = document.createElement('div');
+                        linksDiv.className = 'reference-document-links';
+                        
+                        if (highestScoreDoc.view_url && highestScoreDoc.download_url) {
+                            const viewLink = document.createElement('a');
+                            viewLink.href = highestScoreDoc.view_url;
+                            viewLink.target = '_blank';
+                            viewLink.className = 'reference-link view';
+                            viewLink.textContent = '👁️ View PDF';
+                            
+                            const downloadLink = document.createElement('a');
+                            downloadLink.href = highestScoreDoc.download_url;
+                            downloadLink.download = highestScoreDoc.filename;
+                            downloadLink.className = 'reference-link download';
+                            downloadLink.textContent = '⬇️ Download';
+                            
+                            linksDiv.appendChild(viewLink);
+                            linksDiv.appendChild(downloadLink);
+                        } else {
+                            const noLinkSpan = document.createElement('span');
+                            noLinkSpan.style.color = '#999';
+                            noLinkSpan.style.fontSize = '12px';
+                            noLinkSpan.textContent = 'PDF links not available';
+                            linksDiv.appendChild(noLinkSpan);
+                        }
+                        
+                        docDiv.appendChild(headerDiv);
+                        docDiv.appendChild(contentDiv);
+                        docDiv.appendChild(linksDiv);
+                        referenceDiv.appendChild(docDiv);
+                    }
+                    
+                    messageContent.appendChild(referenceDiv);
+                }
             } else {
                 // User messages as plain text
                 messageContent.textContent = content;
@@ -320,7 +516,7 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    addMessage(data.answer, false, data.timestamp);
+                    addMessage(data.answer, false, data.timestamp, data.source_documents, data.is_relevant);
                 } else {
                     showError(data.error || 'An error occurred while processing your request.');
                 }
@@ -347,6 +543,84 @@
 
         // Focus on input when page loads
         messageInput.focus();
+
+        // Modal logic
+        const uploadModal = document.getElementById('uploadModal');
+        const openUploadModal = document.getElementById('openUploadModal');
+        const closeUploadModal = document.getElementById('closeUploadModal');
+        const uploadForm = document.getElementById('uploadForm');
+        const uploadStatus = document.getElementById('uploadStatus');
+        const progressBarContainer = document.getElementById('progressBarContainer');
+        const progressBar = document.getElementById('progressBar');
+        const closeAfterUpload = document.getElementById('closeAfterUpload');
+        const uploadBtn = document.getElementById('uploadBtn');
+        function resetUploadForm() {
+            uploadForm.reset();
+            uploadStatus.innerHTML = '';
+            progressBarContainer.style.display = 'none';
+            progressBar.style.width = '0%';
+            closeAfterUpload.style.display = 'none';
+            uploadBtn.style.display = '';
+        }
+        openUploadModal.onclick = function() {
+            uploadModal.style.display = 'block';
+            resetUploadForm();
+        }
+        closeUploadModal.onclick = function() {
+            uploadModal.style.display = 'none';
+            resetUploadForm();
+        }
+        closeAfterUpload.onclick = function() {
+            uploadModal.style.display = 'none';
+            resetUploadForm();
+        }
+        window.onclick = function(event) {
+            if (event.target == uploadModal) {
+                uploadModal.style.display = 'none';
+                resetUploadForm();
+            }
+        }
+        uploadForm.onsubmit = async function(e) {
+            e.preventDefault();
+            uploadStatus.innerHTML = '<b>Uploading...</b>';
+            progressBarContainer.style.display = 'block';
+            progressBar.style.width = '30%';
+            uploadBtn.style.display = 'none';
+            closeAfterUpload.style.display = 'none';
+            const formData = new FormData(uploadForm);
+            const files = document.getElementById('pdfs').files;
+            if (files.length === 0 || files.length > 3) {
+                uploadStatus.innerHTML = 'Please select 1 to 3 PDF files.';
+                progressBarContainer.style.display = 'none';
+                uploadBtn.style.display = '';
+                return;
+            }
+            for (let i = 0; i < files.length; i++) {
+                formData.append('pdfs', files[i]);
+            }
+            try {
+                // Simulate upload progress
+                setTimeout(() => { progressBar.style.width = '60%'; uploadStatus.innerHTML = '<b>Indexing your document, please wait...</b>'; }, 1200);
+                const response = await fetch('/upload_pdf', {
+                    method: 'POST',
+                    body: formData
+                });
+                setTimeout(() => { progressBar.style.width = '90%'; }, 1800);
+                const data = await response.json();
+                progressBar.style.width = '100%';
+                if (response.ok) {
+                    let msg = '<b>Your PDF has been successfully processed.</b><br>You can now ask questions based on its content.';
+                    uploadStatus.innerHTML = msg;
+                    closeAfterUpload.style.display = 'block';
+                } else {
+                    uploadStatus.innerHTML = data.error || 'Upload failed.';
+                    closeAfterUpload.style.display = 'block';
+                }
+            } catch (err) {
+                uploadStatus.innerHTML = 'Network error.';
+                closeAfterUpload.style.display = 'block';
+            }
+        };
     </script>
 </body>
 </html> 
