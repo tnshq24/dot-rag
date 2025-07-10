@@ -103,7 +103,13 @@ async def upload_and_index_documents(file, tmp_path, metadata):
     # await rag_pipeline.create_search_index()
     blob_name = file.filename  # You may want to make this unique per user/session
     blob_url = rag_pipeline.upload_pdf_to_blob_with_metadata(tmp_path, blob_name, metadata)
-    await rag_pipeline.index_document(blob_name)
+    
+    # Extract the blob path from the returned URL to use for indexing
+    # The URL format is: https://fabricbckp.blob.core.windows.net/dot-docs/Categories/{project_code}/{project_code}_{filename}.pdf
+    # We need to extract: Categories/{project_code}/{project_code}_{filename}.pdf
+    blob_path = blob_url.split('/dot-docs/')[-1]
+    
+    await rag_pipeline.index_document(blob_path)
     print("Indexing Done")
     return True
 

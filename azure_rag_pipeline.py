@@ -423,11 +423,25 @@ class AzureRAGPipeline:
             List of dictionaries containing page text and metadata
         """
         try:
-            # Get the blob client for the PDF file
-            blob_client = self.blob_service_client.get_blob_client(
-                container=self.blob_container_name,
-                blob=blob_name
+            # Use the same authentication method as upload_pdf_to_blob_with_metadata
+            from azure.storage.blob import BlobServiceClient
+            from azure.identity import ClientSecretCredential
+            
+            # Authenticate using Service Principal (same as upload method)
+            credential = ClientSecretCredential(
+                tenant_id=os.getenv("TENANT_ID"),
+                client_id=os.getenv("CLIENT_ID"),
+                client_secret=os.getenv("CLIENT_SECRET")
             )
+            
+            account_url = "https://fabricbckp.blob.core.windows.net"
+            blob_service = BlobServiceClient(account_url=account_url, credential=credential)
+            
+            # Get container client
+            container = blob_service.get_container_client("dot-docs")
+            
+            # Get the blob client for the PDF file
+            blob_client = container.get_blob_client(blob_name)
             
             # Download the PDF content from blob storage
             pdf_content = blob_client.download_blob().readall()
