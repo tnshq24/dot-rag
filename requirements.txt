@@ -8,4 +8,4 @@ PyPDF2==3.0.1
 python-dotenv==1.0.0
 httpx>=0.24.0
 gunicorn==21.2.0 
-azure-ai-documentintelligence==1.0.0b4
+azure-ai-documentintelligence==1.0.2

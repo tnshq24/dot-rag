@@ -629,15 +629,13 @@
             closeAfterUpload.style.display = 'none';
             const formData = new FormData(uploadForm);
             const files = document.getElementById('pdfs').files;
-            if (files.length === 0 || files.length > 3) {
-                uploadStatus.innerHTML = 'Please select 1 to 3 PDF files.';
+            if (files.length === 0 || files.length > 1) {
+                uploadStatus.innerHTML = 'Please select 1 PDF file.';
                 progressBarContainer.style.display = 'none';
                 uploadBtn.style.display = '';
                 return;
             }
-            for (let i = 0; i < files.length; i++) {
-                formData.append('pdfs', files[i]);
-            }
+            formData.append('pdfs', files[0]);
             try {
                 // Simulate upload progress
                 setTimeout(() => { progressBar.style.width = '60%'; uploadStatus.innerHTML = '<b>Indexing your document, please wait...</b>'; }, 1200);

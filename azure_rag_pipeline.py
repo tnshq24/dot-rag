@@ -423,25 +423,11 @@ class AzureRAGPipeline:
             List of dictionaries containing page text and metadata
         """
         try:
-            # Use the same authentication method as upload_pdf_to_blob_with_metadata
-            from azure.storage.blob import BlobServiceClient
-            from azure.identity import ClientSecretCredential
-            
-            # Authenticate using Service Principal (same as upload method)
-            credential = ClientSecretCredential(
-                tenant_id=os.getenv("TENANT_ID"),
-                client_id=os.getenv("CLIENT_ID"),
-                client_secret=os.getenv("CLIENT_SECRET")
-            )
-            
-            account_url = "https://fabricbckp.blob.core.windows.net"
-            blob_service = BlobServiceClient(account_url=account_url, credential=credential)
-            
-            # Get container client
-            container = blob_service.get_container_client("dot-docs")
-            
             # Get the blob client for the PDF file
-            blob_client = container.get_blob_client(blob_name)
+            blob_client = self.blob_service_client.get_blob_client(
+                container=self.blob_container_name,
+                blob=blob_name
+            )
             
             # Download the PDF content from blob storage
             pdf_content = blob_client.download_blob().readall()
@@ -464,9 +450,9 @@ class AzureRAGPipeline:
                         "content": text.strip(),
                         "filename": blob_name
                     })
-
-            # if len(pages_content)==0:
-            #     pages_content = self.extract_text_from_pdf_blob_v2(blob_name=blob_name)
+ 
+            if len(pages_content)==0:
+                pages_content = self.extract_text_from_pdf_blob_v2(blob_name=blob_name)
             
             logger.info(f"Extracted text from {len(pages_content)} pages")
             return pages_content
@@ -494,42 +480,36 @@ class AzureRAGPipeline:
             )
             
             pdf_reader = self.document_intelligence_client.begin_analyze_document(
-                "prebuilt-layout", AnalyzeDocumentRequest(url_source=blob_client.url)
+                "prebuilt-read", AnalyzeDocumentRequest(url_source=blob_client.url)
                 )
-
+ 
             pdf_reader = pdf_reader.result()
             pages_content = []
             for page in pdf_reader.pages:
-                page_number = page.page_number
-                text = "\n"
-                if page.lines:
+                # Combine all text from the page
+                page_text = ""
+                
+                # Extract text from lines (preserves reading order)
+                if hasattr(page, 'lines') and page.lines:
                     for line in page.lines:
-                        text = text + "\n" + line.content
-
-                if text.strip():
+                        page_text += line.content + "\n"
+                
+                # If no lines, try paragraphs
+                elif hasattr(pdf_reader, 'paragraphs'):
+                    page_paragraphs = [p for p in pdf_reader.paragraphs
+                                     if hasattr(p, 'bounding_regions') and
+                                     any(br.page_number == page.page_number for br in p.bounding_regions)]
+                    for paragraph in page_paragraphs:
+                        page_text += paragraph.content + "\n\n"
+                
+                # Only include pages with meaningful content
+                if page_text.strip():
                     pages_content.append({
-                        "page_number": page_number,
-                        "content": text.strip(),
-                        "filename": blob_name
+                        "page_number": page.page_number,
+                        "content": page_text.strip(),
+                        "filename": blob_name,
+                        # "extraction_method": "Document Intelligence"
                     })
-
-            if pdf_reader.tables:
-                for table in pdf_reader.tables:
-                    if table.bounding_regions:
-                        for region in table.bounding_regions:
-                            page_number = region.page_number
-                            content = ""
-                            for cell in table.cells:
-                                content = content + "\t" + cell.content
-
-                            if content.strip():
-                                pages_content.append({
-                                    "page_number": page_number,
-                                    "content": content.strip(),
-                                    "filename": blob_name
-                                })
-            
-            logger.info(f"Extracted text from {len(pages_content)} pages")
             return pages_content
             
         except Exception as e:
@@ -660,10 +640,10 @@ class AzureRAGPipeline:
                     chunk_id = f"{safe_filename}_p{page_data['page_number']}_c{i}"
                     
                     chunk_doc = {
-                        "content": chunk,  # Limit content length
-                        "filename": blob_name,  # Limit filename length
+                        "content": chunk[:4000],  # Limit content length
+                        "filename": blob_name[:100],  # Limit filename length
                         "page_number": page_data["page_number"],
-                        "chunk_id": chunk_id  # Limit ID length
+                        "chunk_id": chunk_id[:100]  # Limit ID length
                     }
                     all_chunks.append(chunk_doc)
             
