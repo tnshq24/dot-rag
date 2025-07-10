@@ -162,6 +162,8 @@ def view_pdf(blob_name):
         if not rag_pipeline:
             return jsonify({'error': 'RAG pipeline not initialized'}), 500
         
+        blob_name = blob_name.replace("@","/")
+        
         print(f"Attempting to view PDF: {blob_name}")
         
         # Get the blob client for the PDF file

@@ -350,6 +350,10 @@
         const chatForm = document.getElementById('chatForm');
         const loading = document.getElementById('loading');
 
+        function replacePath(originalPath) {
+            return originalPath.replace(/^\/view_pdf\/([^/]+)\/([^/]+)\//, '/view_pdf/$1@$2@');
+        }
+
         function addMessage(content, isUser = false, timestamp = null, sourceDocuments = null, isRelevant = true) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
@@ -374,10 +378,10 @@
                     content.toLowerCase().includes(pattern.toLowerCase())
                 );
                 
-                console.log('Content:', content);
-                console.log('Has no info:', hasNoInfo);
-                console.log('Source documents:', sourceDocuments);
-                console.log('Is relevant:', isRelevant);
+                // console.log('Content:', content);
+                // console.log('Has no info:', hasNoInfo);
+                // console.log('Source documents:', sourceDocuments);
+                // console.log('Is relevant:', isRelevant);
                 
                 if (sourceDocuments && sourceDocuments.length > 0 && !hasNoInfo && isRelevant) {
                     const referenceDiv = document.createElement('div');
@@ -401,7 +405,7 @@
                         }
                     });
                     
-                    console.log('Highest score document:', highestScoreDoc);
+                    // console.log('Highest score document:', highestScoreDoc);
                     
                     // Display only the highest confidence document
                     if (highestScoreDoc.score > 0.85) {
@@ -426,7 +430,9 @@
                         
                         if (highestScoreDoc.view_url && highestScoreDoc.download_url) {
                             const viewLink = document.createElement('a');
-                            viewLink.href = highestScoreDoc.view_url;
+                            // console.log(replacePath(highestScoreDoc.view_url))
+                            // viewLink.href = highestScoreDoc.view_url;
+                            viewLink.href = replacePath(highestScoreDoc.view_url);
                             viewLink.target = '_blank';
                             viewLink.className = 'reference-link view';
                             viewLink.textContent = '👁️ View PDF';

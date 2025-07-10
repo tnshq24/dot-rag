@@ -10,6 +10,7 @@ import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import asyncio
+import string
 from dotenv import load_dotenv
 
 # Azure SDK imports
@@ -450,8 +451,8 @@ class AzureRAGPipeline:
                         "filename": blob_name
                     })
 
-            if len(pages_content)==0:
-                pages_content = self.extract_text_from_pdf_blob_v2(blob_name=blob_name)
+            # if len(pages_content)==0:
+            #     pages_content = self.extract_text_from_pdf_blob_v2(blob_name=blob_name)
             
             logger.info(f"Extracted text from {len(pages_content)} pages")
             return pages_content
@@ -641,14 +642,14 @@ class AzureRAGPipeline:
                         continue
                     
                     # Create a safe, unique ID
-                    safe_filename = blob_name.replace('.', '_').replace(' ', '_')
+                    safe_filename = blob_name.replace('.', '_').replace(' ', '_').replace("/", "=")
                     chunk_id = f"{safe_filename}_p{page_data['page_number']}_c{i}"
                     
                     chunk_doc = {
-                        "content": chunk[:4000],  # Limit content length
-                        "filename": blob_name[:100],  # Limit filename length
+                        "content": chunk,  # Limit content length
+                        "filename": blob_name,  # Limit filename length
                         "page_number": page_data["page_number"],
-                        "chunk_id": chunk_id[:100]  # Limit ID length
+                        "chunk_id": chunk_id  # Limit ID length
                     }
                     all_chunks.append(chunk_doc)
             
@@ -769,8 +770,9 @@ class AzureRAGPipeline:
             )
             
             # Step 3: Execute the search
+            translator = str.maketrans(string.punctuation, ' ' * len(string.punctuation))
             search_results = self.search_client.search(
-                search_text=[query],  # We're doing pure vector search
+                search_text=[query.translate(translator).strip()],  # We're doing pure vector search
                 #vector_queries=[vector_query],
                 top=top_k
             )
@@ -1029,15 +1031,17 @@ async def main():
     # await rag_pipeline.index_document(blob_name)
     
     # Step 2: Upload a PDF to blob storage (replace with your PDF path)
-    for file_name in os.listdir("dot-docs"):
-        print(file_name)
-        pdf_path = f"dot-docs/{file_name}"
-        blob_name = file_name
-        rag_pipeline.upload_pdf_to_blob(pdf_path, blob_name)
-    
-        # Step 3: Index the document
-        print("Indexing document...")
-        await rag_pipeline.index_document(blob_name)
+    for folder_name in os.listdir("dot-docs"):
+        if folder_name[0]!=".":
+            for file_name in os.listdir(f"dot-docs/{folder_name}"):
+                print(folder_name, file_name)
+                pdf_path = f"dot-docs/{folder_name}/{file_name}"
+                blob_name = f"Categories/{folder_name}/{file_name}"
+                rag_pipeline.upload_pdf_to_blob(pdf_path, blob_name)
+            
+                # Step 3: Index the document
+                print("Indexing document...")
+                await rag_pipeline.index_document(blob_name)
     
     # # Step 4: Query the system
     # print("Querying the system...")
