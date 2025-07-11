@@ -5,11 +5,129 @@ from azure_rag_pipeline import AzureRAGPipeline
 import os
 import tempfile
 import traceback
+import uuid
+from datetime import datetime
+from azure.cosmos import CosmosClient, PartitionKey
+import hashlib
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-here')
 
 # Initialize the RAG pipeline
 rag_pipeline = None
+
+# Cosmos DB configuration
+COSMOS_ENDPOINT = os.environ.get('COSMOS_ENDPOINT')
+COSMOS_KEY = os.environ.get('COSMOS_KEY')
+COSMOS_DATABASE_NAME = 'chatbot_db'
+COSMOS_CONTAINER_NAME = 'chat_sessions'
+
+# Initialize Cosmos DB client
+cosmos_client = None
+database = None
+container = None
+
+def initialize_cosmos_db():
+    """Initialize Cosmos DB connection"""
+    global cosmos_client, database, container
+    try:
+        if COSMOS_ENDPOINT and COSMOS_KEY:
+            cosmos_client = CosmosClient(COSMOS_ENDPOINT, COSMOS_KEY)
+            database = cosmos_client.create_database_if_not_exists(COSMOS_DATABASE_NAME)
+            container = database.create_container_if_not_exists(
+                id=COSMOS_CONTAINER_NAME,
+                partition_key=PartitionKey(path="/user_id")
+            )
+            print("✅ Cosmos DB initialized successfully")
+            return True
+        else:
+            print("⚠️ Cosmos DB credentials not found. Session management will be disabled.")
+            return False
+    except Exception as e:
+        if 'Incorrect padding' in str(e):
+            print("❌ Failed to initialize Cosmos DB: Incorrect padding.\nThis usually means your COSMOS_KEY in ENV.txt is not copied correctly. Please ensure there are no extra spaces, line breaks, or missing characters. Copy the key exactly as provided by Azure.")
+        else:
+            print(f"❌ Failed to initialize Cosmos DB: {e}")
+        return False
+
+def generate_user_id(email):
+    """Generate a consistent user ID from email"""
+    return hashlib.md5(email.encode()).hexdigest()
+
+def authenticate_user(email, password):
+    """Simple authentication - in production, use proper auth"""
+    # For now, hardcoded credentials as requested
+    if email == "admin@xyz.com" and password == "admin":
+        return True
+    elif email == "user1@xyz.com" and password == "user1":
+        return True
+    return False
+
+# def get_or_create_session_id():
+#     """Get existing session ID or create new one"""
+#     if 'session_id' not in session:
+#         session['session_id'] = str(uuid.uuid4())
+#     return session['session_id']
+
+def save_chat_message(user_id, conversation_id, session_id, question, answer, timestamp, source_documents=None):
+    """Save chat message to Cosmos DB"""
+    if not container:
+        return False
+    
+    try:
+        chat_message = {
+            'id': str(uuid.uuid4()),
+            'user_id': user_id,
+            'conversation_id': conversation_id,
+            'session_id': session_id,
+            'question': question,
+            'answer': answer,
+            'timestamp': timestamp,
+            'source_documents': source_documents or [],
+            'type': 'chat_message'
+        }
+        
+        container.create_item(chat_message)
+        return True
+    except Exception as e:
+        print(f"Error saving chat message: {e}")
+        return False
+
+def get_user_chat_history(user_id, limit=50):
+    """Get chat history for a user"""
+    if not container:
+        return []
+    
+    try:
+        query = f"SELECT * FROM c WHERE c.user_id = '{user_id}' AND c.type = 'chat_message' ORDER BY c.timestamp DESC OFFSET 0 LIMIT {limit}"
+        items = list(container.query_items(query=query, enable_cross_partition_query=True))
+        return items
+    except Exception as e:
+        print(f"Error getting chat history: {e}")
+        return []
+
+def get_user_sessions(user_id):
+    """Get all sessions for a user"""
+    if not container:
+        return []
+    
+    try:
+        query = f"SELECT DISTINCT c.session_id FROM c WHERE c.user_id = '{user_id}' AND c.type = 'chat_message' ORDER BY c.timestamp DESC "
+        items = list(container.query_items(query=query, enable_cross_partition_query=True))
+        for idx, session in enumerate(items):
+            try:
+                query_2 = f"SELECT c.question FROM c WHERE c.user_id = '{user_id}' AND c.session_id = '{session['session_id']}' AND c.type = 'chat_message' ORDER BY c.timestamp ASC"
+                items_2 = list(container.query_items(query=query_2, enable_cross_partition_query=True))[0]
+                items[idx]["question"] = items_2["question"]
+            except:
+                items[idx]["question"] = "Unknown Question"
+        return items
+    except Exception as e:
+        print(f"Error getting user sessions: {e}")
+        return []
 
 def initialize_rag_pipeline():
     """Initialize the RAG pipeline"""
@@ -63,12 +181,85 @@ def index():
     """Main page with chat interface"""
     return render_template('index.html')
 
+@app.route('/login', methods=['POST'])
+def login():
+    """Handle user login"""
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not email or not password:
+            return jsonify({'error': 'Email and password are required'}), 400
+        
+        if authenticate_user(email, password):
+            user_id = generate_user_id(email)
+            session['user_id'] = user_id
+            session['user_email'] = email
+            session['logged_in'] = True
+            
+            return jsonify({
+                'success': True,
+                'user_id': user_id,
+                'email': email
+            })
+        else:
+            return jsonify({'error': 'Invalid credentials'}), 401
+            
+    except Exception as e:
+        return jsonify({'error': f'Login error: {str(e)}'}), 500
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    """Handle user logout"""
+    session.clear()
+    return jsonify({'success': True})
+
+@app.route('/check_auth')
+def check_auth():
+    """Check if user is authenticated"""
+    if session.get('logged_in'):
+        if "admin" in session.get("user_email"):
+            isadmin = True
+        else:
+            isadmin = False
+        return jsonify({
+            'authenticated': True,
+            'user_id': session.get('user_id'),
+            'email': session.get('user_email'),
+            'isadmin': isadmin
+        })
+    return jsonify({'authenticated': False})
+
+@app.route('/chat_history')
+def chat_history():
+    """Get chat history for authenticated user"""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session.get('user_id')
+    history = get_user_chat_history(user_id)
+    return jsonify({'history': history})
+
+@app.route('/user_sessions')
+def user_sessions():
+    """Get all sessions for authenticated user"""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session.get('user_id')
+    sessions = get_user_sessions(user_id)
+    return jsonify({'sessions': sessions})
+
 @app.route('/chat', methods=['POST'])
 def chat():
     """Handle chat requests"""
     try:
         data = request.get_json()
         question = data.get('question', '').strip()
+        user_id = data.get('user_id', '').strip()
+        conversation_id = data.get('conversation_id', '').strip()
+        session_id = data.get('session_id', '').strip()
         
         if not question:
             return jsonify({'error': 'Please provide a question'}), 400
@@ -81,10 +272,26 @@ def chat():
         asyncio.set_event_loop(loop)
         
         try:
-            response = loop.run_until_complete(rag_pipeline.query(question, top_k=5))
+            response = loop.run_until_complete(rag_pipeline.query(
+                question, user_id=user_id, 
+                conversation_id=conversation_id, 
+                session_id=session_id, top_k=5
+                )
+                )
             print(response)
-            # Clean and format the answer
-            # clean_answer = clean_response(response['answer'])
+            
+            # Save chat message to Cosmos DB if user is authenticated
+            if user_id and conversation_id and session_id:
+                timestamp = datetime.utcnow().isoformat()
+                save_chat_message(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    session_id=session_id,
+                    question=question,
+                    answer=response['answer'],
+                    timestamp=timestamp,
+                    source_documents=response.get('source_documents', [])
+                )
             
             return jsonify({
                 'answer': response['answer'],
@@ -209,11 +416,54 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'pipeline_initialized': rag_pipeline is not None})
 
+@app.route('/session_messages')
+def session_messages():
+    """Get all messages for a given session_id (for authenticated user)"""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    user_id = session.get('user_id')
+    session_id = request.args.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'Missing session_id'}), 400
+    if not container:
+        return jsonify({'messages': []})
+    try:
+        query = f"SELECT * FROM c WHERE c.user_id = '{user_id}' AND c.session_id = '{session_id}' AND c.type = 'chat_message' ORDER BY c.timestamp ASC"
+        items = list(container.query_items(query=query, enable_cross_partition_query=True))
+        return jsonify({'messages': items})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/delete_session', methods=['POST'])
+def delete_session():
+    """Delete all messages for a given session_id (for authenticated user)"""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    user_id = session.get('user_id')
+    data = request.get_json()
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'Missing session_id'}), 400
+    if not container:
+        return jsonify({'success': False})
+    try:
+        # Get all messages for this session
+        query = f"SELECT c.id FROM c WHERE c.user_id = '{user_id}' AND c.session_id = '{session_id}' AND c.type = 'chat_message'"
+        items = list(container.query_items(query=query, enable_cross_partition_query=True))
+        for item in items:
+            container.delete_item(item['id'], partition_key=user_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # Initialize the RAG pipeline when the app starts
 if initialize_rag_pipeline():
     print("✅ RAG pipeline initialized successfully")
 else:
     print("❌ Failed to initialize RAG pipeline")
+
+# Initialize Cosmos DB
+initialize_cosmos_db()
 
 if __name__ == '__main__':
     # Run the Flask app
