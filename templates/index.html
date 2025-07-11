@@ -1595,6 +1595,8 @@
                 const data = await response.json();
                 
                 if (response.ok) {
+                    console.log("Source Docs")
+                    console.log(data.source_documents)
                     addMessage(data.answer, false, data.timestamp, data.source_documents);
                     // Only update chat history after first message in a new session
                     if (!activeSessionId) {
@@ -1657,73 +1659,122 @@
                     content.toLowerCase().includes(pattern.toLowerCase())
                 );
                 
-                    if (!hasNoInfo) {
-                    const referenceDiv = document.createElement('div');
-                    referenceDiv.className = 'reference-documents';
-                    
-                    const referenceHeader = document.createElement('h4');
-                    referenceHeader.textContent = '📚 Reference Documents';
-                    referenceDiv.appendChild(referenceHeader);
-                    
-                        // Find the document with the highest confidence score
-                    let highestScoreDoc = null;
-                    sourceDocuments.forEach((doc) => {
-                        if (!highestScoreDoc || doc.score > highestScoreDoc.score) {
-                            highestScoreDoc = {
-                                filename: doc.filename,
-                                view_url: doc.view_url,
-                                download_url: doc.download_url,
-                                page_number: doc.page_number,
-                                score: doc.score
-                            };
-                        }
-                    });
-                    
-                    // Display only the highest confidence document
-                        if (highestScoreDoc && highestScoreDoc.score > 0.85) {
-                        const docDiv = document.createElement('div');
-                        docDiv.className = 'reference-document';
+                    if (!hasNoInfo) 
+                    {
+                        const referenceDiv = document.createElement('div');
+                        referenceDiv.className = 'reference-documents';
                         
+                        const referenceHeader = document.createElement('h4');
+                        referenceHeader.textContent = '📚 Reference Documents';
+                        referenceDiv.appendChild(referenceHeader);
+                        
+                            // Find the document with the highest confidence score
+                        let highestScoreDoc = null;
+                        sourceDocuments.forEach((doc) => {
+                            console.log(doc)
+                            const docDiv = document.createElement('div');
+                            docDiv.className = 'reference-document';
+                            
                             const titleDiv = document.createElement('div');
                             titleDiv.className = 'reference-document-title';
-                            titleDiv.textContent = getFilenameOnly(highestScoreDoc.filename);
-                        
-                        const contentDiv = document.createElement('div');
-                        contentDiv.className = 'reference-document-content';
-                        contentDiv.textContent = 'Referenced from this document';
-                        
-                        const linksDiv = document.createElement('div');
-                        linksDiv.className = 'reference-document-links';
-                        
-                        if (highestScoreDoc.view_url && highestScoreDoc.download_url) {
-                            const viewLink = document.createElement('a');
-                            viewLink.href = replacePath(highestScoreDoc.view_url);
-                            viewLink.target = '_blank';
-                            viewLink.className = 'reference-link view';
-                            viewLink.textContent = '👁️ View PDF';
+                            titleDiv.textContent = getFilenameOnly(doc.filename);
                             
-                            const downloadLink = document.createElement('a');
-                            downloadLink.href = highestScoreDoc.download_url;
-                            downloadLink.download = getFilenameOnly(highestScoreDoc.filename);
-                            downloadLink.className = 'reference-link download';
-                            downloadLink.textContent = '⬇️ Download';
+                            const contentDiv = document.createElement('div');
+                            contentDiv.className = 'reference-document-content';
+                            contentDiv.textContent = 'Referenced from this document';
                             
-                            linksDiv.appendChild(viewLink);
-                            linksDiv.appendChild(downloadLink);
-                        } else {
-                            const noLinkSpan = document.createElement('span');
+                            const linksDiv = document.createElement('div');
+                            linksDiv.className = 'reference-document-links';
+                            
+                            if (doc.view_url && doc.download_url) {
+                                const viewLink = document.createElement('a');
+                                viewLink.href = replacePath(doc.view_url);
+                                viewLink.target = '_blank';
+                                viewLink.className = 'reference-link view';
+                                viewLink.textContent = '👁️ View PDF';
+                                
+                                const downloadLink = document.createElement('a');
+                                downloadLink.href = doc.download_url;
+                                downloadLink.download = getFilenameOnly(doc.filename);
+                                downloadLink.className = 'reference-link download';
+                                downloadLink.textContent = '⬇️ Download';
+                                
+                                linksDiv.appendChild(viewLink);
+                                linksDiv.appendChild(downloadLink);
+                            } 
+                            else 
+                            {
+                                const noLinkSpan = document.createElement('span');
                                 noLinkSpan.style.color = '#8e8ea0';
-                            noLinkSpan.style.fontSize = '12px';
-                            noLinkSpan.textContent = 'PDF links not available';
-                            linksDiv.appendChild(noLinkSpan);
-                        }
+                                noLinkSpan.style.fontSize = '12px';
+                                noLinkSpan.textContent = 'PDF links not available';
+                                linksDiv.appendChild(noLinkSpan);
+                            }
                         
                             docDiv.appendChild(titleDiv);
-                        docDiv.appendChild(contentDiv);
-                        docDiv.appendChild(linksDiv);
-                        referenceDiv.appendChild(docDiv);
-                    }
+                            docDiv.appendChild(contentDiv);
+                            docDiv.appendChild(linksDiv);
+                            referenceDiv.appendChild(docDiv);
+
+                            if (!highestScoreDoc || doc.score > highestScoreDoc.score) 
+                            {
+                                highestScoreDoc = {
+                                    filename: doc.filename,
+                                    view_url: doc.view_url,
+                                    download_url: doc.download_url,
+                                    page_number: doc.page_number,
+                                    score: doc.score
+                                };
+                            }
+                        });
                     
+                        // Display only the highest confidence document
+                        // if (highestScoreDoc && highestScoreDoc.score > 0.85) 
+                        // {
+                        //     const docDiv = document.createElement('div');
+                        //     docDiv.className = 'reference-document';
+                            
+                        //     const titleDiv = document.createElement('div');
+                        //     titleDiv.className = 'reference-document-title';
+                        //     titleDiv.textContent = getFilenameOnly(highestScoreDoc.filename);
+                            
+                        //     const contentDiv = document.createElement('div');
+                        //     contentDiv.className = 'reference-document-content';
+                        //     contentDiv.textContent = 'Referenced from this document';
+                            
+                        //     const linksDiv = document.createElement('div');
+                        //     linksDiv.className = 'reference-document-links';
+                            
+                        //     if (highestScoreDoc.view_url && highestScoreDoc.download_url) {
+                        //         const viewLink = document.createElement('a');
+                        //         viewLink.href = replacePath(highestScoreDoc.view_url);
+                        //         viewLink.target = '_blank';
+                        //         viewLink.className = 'reference-link view';
+                        //         viewLink.textContent = '👁️ View PDF';
+                                
+                        //         const downloadLink = document.createElement('a');
+                        //         downloadLink.href = highestScoreDoc.download_url;
+                        //         downloadLink.download = getFilenameOnly(highestScoreDoc.filename);
+                        //         downloadLink.className = 'reference-link download';
+                        //         downloadLink.textContent = '⬇️ Download';
+                                
+                        //         linksDiv.appendChild(viewLink);
+                        //         linksDiv.appendChild(downloadLink);
+                        //     } 
+                        //     else 
+                        //     {
+                        //         const noLinkSpan = document.createElement('span');
+                        //         noLinkSpan.style.color = '#8e8ea0';
+                        //         noLinkSpan.style.fontSize = '12px';
+                        //         noLinkSpan.textContent = 'PDF links not available';
+                        //         linksDiv.appendChild(noLinkSpan);
+                        //     }
+                        
+                        //     docDiv.appendChild(titleDiv);
+                        //     docDiv.appendChild(contentDiv);
+                        //     docDiv.appendChild(linksDiv);
+                        //     referenceDiv.appendChild(docDiv);
+                        // }
                         contentDiv.appendChild(referenceDiv);
                     }
                 }

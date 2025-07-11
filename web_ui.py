@@ -10,6 +10,7 @@ from datetime import datetime
 from azure.cosmos import CosmosClient, PartitionKey
 import hashlib
 from dotenv import load_dotenv
+from difflib import SequenceMatcher
 
 load_dotenv()
 
@@ -278,8 +279,27 @@ def chat():
                 session_id=session_id, top_k=5
                 )
                 )
-            print(response)
+            # print(response)
+            file_names = []
+            for file in response["source_documents"]:
+                file_names.append(file["filename"])
+
             
+            to_consider = [ans for ans in response["answer"].split() if ".pdf" in ans]
+            print("To Consider : ", to_consider)
+            pdf_to_consider = [ans for ans in response["answer"].split() if ans in file_names]
+            if len(pdf_to_consider)!=len(to_consider):
+                pdf_to_consider = {file for file in file_names for s_file in to_consider if SequenceMatcher(None, file, s_file).ratio() > 0.9}
+
+            print("PDF to Consider : ", pdf_to_consider)
+            reference_sources = []
+            added_file = []
+            for file in response["source_documents"]:
+                if  file["filename"] in pdf_to_consider and file["filename"] not in added_file:
+                    reference_sources.append(file)
+                    added_file.append(file["filename"])
+
+            print(reference_sources)
             # Save chat message to Cosmos DB if user is authenticated
             if user_id and conversation_id and session_id:
                 timestamp = datetime.utcnow().isoformat()
@@ -290,14 +310,14 @@ def chat():
                     question=question,
                     answer=response['answer'],
                     timestamp=timestamp,
-                    source_documents=response.get('source_documents', [])
+                    source_documents=reference_sources
                 )
             
             return jsonify({
                 'answer': response['answer'],
                 'question': question,
                 'timestamp': response.get('timestamp', ''),
-                'source_documents': response.get('source_documents', [])
+                'source_documents': reference_sources
             })
             
         finally:
