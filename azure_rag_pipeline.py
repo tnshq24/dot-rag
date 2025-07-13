@@ -278,77 +278,10 @@ class AzureRAGPipeline:
         try:
             # Create or update the index in Azure AI Search
             result = self.search_index_client.create_or_update_index(index)
-            # ocr_skill = OcrSkill(
-            #     name="ocrSkill",
-            #     description="Extract text (OCR)",
-            #     context="/document",
-            #     default_language_code="en",
-            #     inputs=[
-            #         InputFieldMappingEntry(name="image", source="/document/content")
-            #     ],
-            #     outputs=[
-            #         OutputFieldMappingEntry(name="text", target_name="content")
-            #     ]
-            # )
-            # skillset = SearchIndexerSkillset(
-            #     name="ocr-skillset",
-            #     description="OCR skillset for scanned PDFs",
-            #     skills=[ocr_skill]
-            # )
-            # self.search_indexer_client.create_or_update_skillset(skillset)
-
-            # data_source = SearchIndexerDataSourceConnection(
-            #     name="fabricbckp",
-            #     type=SearchIndexerDataSourceType.AZURE_BLOB,
-            #     connection_string=self.blob_connection_string,
-            #     container={"name": self.blob_container_name},
-            #     description="Blob container with PDFs"
-            # )
-
-            # self.search_indexer_client.create_or_update_data_source_connection(data_source)
-            # indexer = SearchIndexer(
-            #     name=self.index_name,
-            #     data_source_name="fabricbckp",
-            #     target_index_name=self.index_name,
-            #     skillset_name="ocr-skillset",
-            #     parameters=IndexingParameters(configuration={"parsingMode": "default"})
-            # )
-            # self.search_indexer_client.create_or_update_indexer(indexer)
-            # self.search_indexer_client.run_indexer(self.search_client)
-
             logger.info(f"Search index '{self.index_name}' created successfully")
             return result
         except Exception as e:
             logger.error(f"Error creating search index: {str(e)}")
-            raise
-
-    def upload_pdf_to_blob(self, file_path: str, blob_name: str) -> str:
-        """
-        Upload a PDF file to Azure Blob Storage
-
-        Args:
-            file_path: Local path to the PDF file
-            blob_name: Name to give the blob in storage
-
-        Returns:
-            URL of the uploaded blob
-        """
-        try:
-
-            # Get a reference to the blob client
-            blob_client = self.blob_service_client.get_blob_client(
-                container=self.blob_container_name, blob=blob_name
-            )
-
-            # Upload the file to blob storage
-            with open(file_path, "rb") as data:
-                blob_client.upload_blob(data, overwrite=True)
-
-            logger.info(f"PDF uploaded to blob storage: {blob_name}")
-            return blob_client.url
-
-        except Exception as e:
-            logger.error(f"Error uploading PDF to blob storage: {str(e)}")
             raise
 
     def upload_pdf_to_blob_with_metadata(
@@ -790,14 +723,14 @@ class AzureRAGPipeline:
             )
 
             # Step 3: Execute the search
-            translator = str.maketrans(
-                string.punctuation, " " * len(string.punctuation)
-            )
+            # translator = str.maketrans(
+            #     string.punctuation, " " * len(string.punctuation)
+            # )
             search_results = self.search_client.search(
-                search_text=[
-                    query.translate(translator).strip()
-                ],  # We're doing pure vector search
-                # vector_queries=[vector_query],
+                # search_text=[
+                #     query.translate(translator).strip()
+                # ],  # We're doing pure vector search
+                vector_queries=[vector_query],
                 top=top_k,
             )
 
@@ -900,8 +833,8 @@ class AzureRAGPipeline:
         user_id: str,
         conversation_id: str,
         session_id: str,
-        file_name= None,
-        project_code= None,
+        file_name=None,
+        project_code=None,
         top_k: int = 5,
     ) -> Dict[str, Any]:
         """
@@ -935,14 +868,14 @@ class AzureRAGPipeline:
             question_column_name = "question"
             # Step 1: Fetch Past Questions from Cosmos DB
             if not file_name or not project_code:
-                cosmos_query = f"""SELECT TOP 5 c.{question_column_name}, c.rephrased_question, c.answer, c.source_documents FROM chat_history c WHERE c.user_id = '{user_id}' AND c.session_id = '{session_id}' ORDER BY c._ts DESC"""
+                cosmos_query = f"""SELECT TOP 5 c.{question_column_name}, c.rephrased_question, c.answer FROM chat_sessions c WHERE c.user_id = '{user_id}' AND c.session_id = '{session_id}' ORDER BY c._ts DESC"""
             else:
-                cosmos_query = f"""SELECT TOP 5 c.{question_column_name}, c.rephrased_question, c.answer, c.source_documents FROM chat_history c WHERE c.user_id = '{user_id}' AND c.session_id = '{session_id}' AND c.project_code = '{project_code}' AND c.file_name = '{file_name}' ORDER BY c._ts DESC"""
+                cosmos_query = f"""SELECT TOP 5 c.{question_column_name}, c.rephrased_question, c.answer FROM chat_sessions c WHERE c.user_id = '{user_id}' AND c.session_id = '{session_id}' AND c.project_code = '{project_code}' AND c.file_name = '{file_name}' ORDER BY c._ts DESC"""
             # print(cosmos_query)
 
             fetched_df = self.azure_cosmos.read_table(
                 query=cosmos_query,
-                container_name="chat_history",
+                container_name="chat_sessions",
             )
             # print(fetched_df)
             if fetched_df is None:
@@ -958,7 +891,7 @@ class AzureRAGPipeline:
                         f'Question {idx+1}: {ques}\nAnswer {idx+1}: {row["answer"]}\n\n'
                     )
                 previous_convo_string = previous_convo_string.strip()
-
+                print("PREVIOUS CHAT:", previous_convo_string)
                 rephrase_messages = _query_rephrase_prompt(
                     query=question, previous_conversation=previous_convo_string
                 )
@@ -1018,6 +951,7 @@ class AzureRAGPipeline:
             # Step 5: Return complete response with relevance flag
             response = {
                 "question": question,
+                "rephrased_question": cosmos_data["rephrased_question"],
                 "answer": answer,
                 "source_documents": relevant_docs if is_relevant else [],
                 "is_relevant": is_relevant,
@@ -1025,7 +959,7 @@ class AzureRAGPipeline:
             }
             for key, value in response.items():
                 cosmos_data[key] = value
-            self.azure_cosmos.upload_to_cosmos(cosmos_data, "chat_history")
+            # self.azure_cosmos.upload_to_cosmos(cosmos_data, "chat_history")
             logger.info("RAG query completed successfully")
             return response
 
@@ -1108,7 +1042,13 @@ class AzureRAGPipeline:
             # Step 2: Create the prompt for the chat model
             system_prompt = """You are a helpful assistant that answers questions based on the provided context documents. 
             Use only the information from the context to answer questions. If the answer cannot be found in the context, 
-            say so clearly. Always cite which document and page number you're referencing in your answer.
+            say so clearly. Always cite which document and page number you're referencing in your answer. Also include references at the end on the answer, below format given between triple backticks:
+```
+References:
+- filename1, Pages: number of pages (like 1 and 5)
+- filename2, Pages: number of pages (like 6 and 35)
+```
+
 
 Past Conversation (If any):
 {previous_conversation}"""
@@ -1126,7 +1066,12 @@ Past Conversation (If any):
                 response = self.openai_chat_client.chat.completions.create(
                     model=self.azure_openai_chat_deployment,
                     messages=[
-                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "system",
+                            "content": system_prompt.format(
+                                previous_conversation=previous_convo_string
+                            ),
+                        },
                         {"role": "user", "content": user_prompt},
                     ],
                     max_tokens=1000,
@@ -1137,7 +1082,12 @@ Past Conversation (If any):
                 response = self.openai_chat_client.chat.completions.create(
                     model=self.openai_chat_model,
                     messages=[
-                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "system",
+                            "content": system_prompt.format(
+                                previous_conversation=previous_convo_string
+                            ),
+                        },
                         {"role": "user", "content": user_prompt},
                     ],
                     max_tokens=1000,
@@ -1146,6 +1096,7 @@ Past Conversation (If any):
 
             # Step 4: Extract and return the generated answer
             answer = response.choices[0].message.content
+            answer = answer.replace("```", "")
 
             logger.info("Generated answer using RAG pipeline")
             return answer
