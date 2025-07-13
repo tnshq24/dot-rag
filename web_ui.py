@@ -23,10 +23,10 @@ app.secret_key = os.environ.get("SECRET_KEY", "your-secret-key-here")
 rag_pipeline = None
 
 # Cosmos DB configuration
-COSMOS_ENDPOINT = os.environ.get("COSMOS_ENDPOINT")
-COSMOS_KEY = os.environ.get("COSMOS_KEY")
-COSMOS_DATABASE_NAME = "chatbot_db"
-COSMOS_CONTAINER_NAME = "chat_sessions"
+COSMOS_ENDPOINT = os.environ.get("AZURE_COSMOS_DB_URI")
+COSMOS_KEY = os.environ.get("AZURE_COSMOS_DB_KEY")
+COSMOS_DATABASE_NAME = os.environ.get("AZURE_COSMOS_DB_DATABASE_NAME", "chatbot_db")
+COSMOS_CONTAINER_NAME = os.environ.get("AZURE_COSMOS_DB_CHAT_HISTORY_CONTAINER", "chat_sessions")
 
 # Initialize Cosmos DB client
 cosmos_client = None
@@ -79,7 +79,7 @@ def initialize_cosmos_db():
     except Exception as e:
         if "Incorrect padding" in str(e):
             print(
-                "❌ Failed to initialize Cosmos DB: Incorrect padding.\nThis usually means your COSMOS_KEY in ENV.txt is not copied correctly. Please ensure there are no extra spaces, line breaks, or missing characters. Copy the key exactly as provided by Azure."
+                "❌ Failed to initialize Cosmos DB: Incorrect padding.\nThis usually means your AZURE_COSMOS_DB_KEY in ENV.txt is not copied correctly. Please ensure there are no extra spaces, line breaks, or missing characters. Copy the key exactly as provided by Azure."
             )
         else:
             print(f"❌ Failed to initialize Cosmos DB: {e}")
