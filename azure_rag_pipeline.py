@@ -878,9 +878,9 @@ class AzureRAGPipeline:
                 container_name="chat_sessions",
             )
             # print(fetched_df)
-            if fetched_df is None:
+            if fetched_df is None or fetched_df is False:
                 previous_convo_string = None
-                logger.info("No previous questions found in Cosmos DB")
+                logger.info("No previous questions found in Cosmos DB or error occurred")
             else:
                 previous_convo_string = ""
                 for idx, row in fetched_df.iloc[::-1].reset_index(drop=True).iterrows():
