@@ -23,8 +23,8 @@ app.secret_key = os.environ.get("SECRET_KEY", "your-secret-key-here")
 rag_pipeline = None
 
 # Cosmos DB configuration
-COSMOS_ENDPOINT = os.environ.get("AZURE_COSMOS_DB_URI")
-COSMOS_KEY = os.environ.get("AZURE_COSMOS_DB_KEY")
+COSMOS_ENDPOINT = os.environ.get("COSMOS_ENDPOINT")
+COSMOS_KEY = os.environ.get("COSMOS_KEY")
 COSMOS_DATABASE_NAME = "chatbot_db"
 COSMOS_CONTAINER_NAME = "chat_sessions"
 
