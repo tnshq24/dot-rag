@@ -727,9 +727,7 @@ class AzureRAGPipeline:
             #     string.punctuation, " " * len(string.punctuation)
             # )
             search_results = self.search_client.search(
-                # search_text=[
-                #     query.translate(translator).strip()
-                # ],  # We're doing pure vector search
+                search_text= None,  # We're doing pure vector search
                 vector_queries=[vector_query],
                 top=top_k,
             )
@@ -1029,25 +1027,34 @@ class AzureRAGPipeline:
         """
         try:
             if not is_relevant:
-                return "I'm here to help you with questions about the uploaded documents. Please ask me something related to the PDF files you've uploaded, such as questions about their content, summaries, or specific information from the documents."
-
+                return "Thank you for your question! 😊 However, after reviewing the provided documents, I couldn’t find relevant information to accurately answer your query. If this topic is covered in any other document, please upload it, and I'll be happy to assist further."
+ 
             # Step 1: Prepare the context from retrieved documents
             context = "\n\n".join(
                 [
-                    f"Document: {doc['filename']} (Page {doc['page_number']})\n{doc['content']}"
+                    f"Document: {doc['filename'].split('/')[-1]} (Page {doc['page_number']})\n{doc['content']}"
                     for doc in context_docs
                 ]
             )
 
             # Step 2: Create the prompt for the chat model
-            system_prompt = """You are a helpful assistant that answers questions based on the provided context documents. 
-            Use only the information from the context to answer questions. If the answer cannot be found in the context, 
-            say so clearly. Always cite which document and page number you're referencing in your answer. Also include references at the end on the answer, below format given between triple backticks:
-```
-References:
-- filename1, Pages: number of pages (like 1 and 5)
-- filename2, Pages: number of pages (like 6 and 35)
-```
+            system_prompt = """You are an expert assistant with access to a set of uploaded legal Tender documents.\n Follow these rules strictly while responding:
+            1. Context and Relevance:Answers must ONLY be based on the provided context (documents) and previous chat history.
+ 
+            2. Document References: Whenever referencing an Act, Rule, or document, mention only the official document name (e.g., "Telecommunications Act 2023") instead of the complete backend file path (e.g., avoid mentioning "Categories/Acts/Acts_Telecommunications Act 2023.pdf").
+ 
+            3. Multiple Document References: Provide document references only if the answer is explicitly found within the documents. If clarification is needed, do NOT mention document references prematurely. Ask for clarification clearly without citing any documents.
+ 
+            4. Out-of-Scope Queries: If the user's query does not pertain to any content within the uploaded documents, explicitly state that the query is outside the scope of available documents. Do NOT mention any document references in such cases. Use this response template when information is unavailable:
+            "Thank you for your question! 😊 However, after reviewing the provided documents, I couldn’t find relevant information to accurately answer your query. If this topic is covered in any other document, please upload it, and I'll be happy to assist further.
+ 
+            Also include references at the end on the answer, below format given between triple backticks:
+            ```
+            References:
+            - filename1, Pages: number of pages (like 1 and 5)
+            - filename2, Pages: number of pages (like 6 and 35)
+ 
+            ```
 
 
 Past Conversation (If any):
