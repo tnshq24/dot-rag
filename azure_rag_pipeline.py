@@ -307,6 +307,10 @@ class AzureRAGPipeline:
             project_code = metadata.get("project_code", "")
             label_tag = metadata.get("label_tag", "")
 
+            # safe_filename = os.path.basename(filename)
+            # print(f"safe_filename:{safe_filename}")
+            print(f"filename: {filename}")
+            print(f"blobname:{blob_name}")
             # Use original filename if metadata filename is empty
             if not filename:
                 filename = blob_name
@@ -371,21 +375,25 @@ class AzureRAGPipeline:
             List of dictionaries containing page text and metadata
         """
         try:
+            print(f"blob name in extraction:{blob_name}")
+
             # Get the blob client for the PDF file
+            print("CALLING Blob client")
             blob_client = self.blob_service_client.get_blob_client(
                 container=self.blob_container_name, blob=blob_name
             )
 
             # Download the PDF content from blob storage
+            print("Downloading")
             pdf_content = blob_client.download_blob().readall()
 
             # Create a BytesIO object to read the PDF content
             pdf_stream = BytesIO(pdf_content)
-
+            print("Streaming")
             # Extract text from each page using PyPDF2
             pdf_reader = PyPDF2.PdfReader(pdf_stream)
             pages_content = []
-
+            print(pages_content)
             for page_num, page in enumerate(pdf_reader.pages):
                 # Extract text from the current page
                 text = page.extract_text()
@@ -402,7 +410,7 @@ class AzureRAGPipeline:
 
             if len(pages_content) == 0:
                 pages_content = self.extract_text_from_pdf_blob_v2(blob_name=blob_name)
-
+            # print(f"pages content added filename :{pages_content["filename"]}")
             logger.info(f"Extracted text from {len(pages_content)} pages")
             return pages_content
 
@@ -421,6 +429,7 @@ class AzureRAGPipeline:
             List of dictionaries containing page text and metadata
         """
         try:
+            print(f"blob name in extraction:{blob_name}")
             # Get the blob client for the PDF file
             blob_client = self.blob_service_client.get_blob_client(
                 container=self.blob_container_name, blob=blob_name
@@ -465,6 +474,7 @@ class AzureRAGPipeline:
                             # "extraction_method": "Document Intelligence"
                         }
                     )
+                    # print(f"Pages content name {pages_content["filename"]}")
             return pages_content
 
         except Exception as e:
@@ -608,6 +618,8 @@ class AzureRAGPipeline:
                 return
 
             logger.info(f"Created {len(all_chunks)} chunks from {blob_name}")
+            for c in all_chunks[:3]:
+                logger.info(f"Chunk preview: {c['content'][:200]}...")
 
             # Step 3: Process chunks in smaller batches to avoid overwhelming the API
             batch_size = 10  # Process 10 chunks at a time
@@ -714,6 +726,7 @@ class AzureRAGPipeline:
         """
         try:
             # Step 1: Generate embedding for the search query
+            print(f"query : {query}")
             query_embedding = await self.generate_embeddings([query])
             query_vector = query_embedding[0]
 
@@ -721,16 +734,29 @@ class AzureRAGPipeline:
             vector_query = VectorizedQuery(
                 vector=query_vector, k_nearest_neighbors=top_k, fields="content_vector"
             )
+            print(
+                f"Query vector: {query_embedding[0][:5]}... total dims: {len(query_embedding[0])}"
+            )
 
             # Step 3: Execute the search
             # translator = str.maketrans(
             #     string.punctuation, " " * len(string.punctuation)
             # )
+
+            # keyword_text = query.translate(translator).strip()
+            # print(f"hybrid search: {keyword_text}")
+
             search_results = self.search_client.search(
-                search_text= None,  # We're doing pure vector search
+                search_text=None,  # We're doing pure vector search
                 vector_queries=[vector_query],
                 top=top_k,
             )
+            search_results = list(search_results)
+            print(f"Found {len(search_results)} search results")
+            for result in search_results:
+                print(
+                    f"{result['filename']} | Page {result['page_number']} | Score: {result['@search.score']}"
+                )
 
             # Step 4: Process and return results with blob URLs
             results = []
@@ -878,7 +904,13 @@ class AzureRAGPipeline:
             # print(fetched_df)
             if fetched_df is None or fetched_df is False:
                 previous_convo_string = None
-                logger.info("No previous questions found in Cosmos DB or error occurred")
+                logger.info(
+                    "No previous questions found in Cosmos DB or error occurred"
+                )
+
+                # setting rephrased query to original query
+                cosmos_data["rephrased_question"] = question
+                question_column_name = "rephrased_question"
             else:
                 previous_convo_string = ""
                 for idx, row in fetched_df.iloc[::-1].reset_index(drop=True).iterrows():
@@ -893,7 +925,7 @@ class AzureRAGPipeline:
                 rephrase_messages = _query_rephrase_prompt(
                     query=question, previous_conversation=previous_convo_string
                 )
-
+                print(f"rephrase question:{rephrase_messages}")
                 if self.use_azure_openai:
                     # For Azure OpenAI, use the deployment name as the model
                     response = self.openai_chat_client.chat.completions.create(
@@ -922,7 +954,11 @@ class AzureRAGPipeline:
                 if "not a follow-up question" not in rephrased_query.lower():
                     cosmos_data["rephrased_question"] = rephrased_query
                     question_column_name = "rephrased_question"
-                del response
+                else:
+                    cosmos_data["rephrased_question"] = question
+                    question_column_name = "rephrased_question"
+
+                # del response
 
             # Step 2: Search for relevant documents
             relevant_docs = await self.search_similar_documents(
@@ -1027,38 +1063,36 @@ class AzureRAGPipeline:
         """
         try:
             if not is_relevant:
-                return "Thank you for your question! 😊 However, after reviewing the provided documents, I couldn’t find relevant information to accurately answer your query. If this topic is covered in any other document, please upload it, and I'll be happy to assist further."
- 
+                return """Thanks for your question! 😊 Unfortunately, I couldn’t find any relevant information in the uploaded documents to answer your question accurately. If you have any specific document that mentions this topic, feel free to upload it and I’ll gladly help!"""
+
             # Step 1: Prepare the context from retrieved documents
             context = "\n\n".join(
                 [
-                    f"Document: {doc['filename'].split('/')[-1]} (Page {doc['page_number']})\n{doc['content']}"
+                    f"Document: {doc['filename']} (Page {doc['page_number']})\n{doc['content']}"
                     for doc in context_docs
                 ]
             )
 
             # Step 2: Create the prompt for the chat model
-            system_prompt = """You are an expert assistant with access to a set of uploaded legal Tender documents.\n Follow these rules strictly while responding:
+            system_prompt = """ You are an expert assistant with access to a set of uploaded legal Tender documents.\n Follow these rules strictly while responding:
             1. Context and Relevance:Answers must ONLY be based on the provided context (documents) and previous chat history.
- 
+
             2. Document References: Whenever referencing an Act, Rule, or document, mention only the official document name (e.g., "Telecommunications Act 2023") instead of the complete backend file path (e.g., avoid mentioning "Categories/Acts/Acts_Telecommunications Act 2023.pdf").
- 
+
             3. Multiple Document References: Provide document references only if the answer is explicitly found within the documents. If clarification is needed, do NOT mention document references prematurely. Ask for clarification clearly without citing any documents.
- 
+
             4. Out-of-Scope Queries: If the user's query does not pertain to any content within the uploaded documents, explicitly state that the query is outside the scope of available documents. Do NOT mention any document references in such cases. Use this response template when information is unavailable:
-            "Thank you for your question! 😊 However, after reviewing the provided documents, I couldn’t find relevant information to accurately answer your query. If this topic is covered in any other document, please upload it, and I'll be happy to assist further.
- 
+            "Thank you for your question! However, after reviewing the provided documents, I couldn’t find relevant information to accurately answer your query. If this topic is covered in any other document, please upload it, and I'll be happy to assist further.
+
             Also include references at the end on the answer, below format given between triple backticks:
             ```
             References:
             - filename1, Pages: number of pages (like 1 and 5)
             - filename2, Pages: number of pages (like 6 and 35)
- 
+
             ```
-
-
-Past Conversation (If any):
-{previous_conversation}"""
+            Past Conversation (If any):
+            {previous_conversation}"""
 
             user_prompt = f"""Context Documents:
             {context}
@@ -1070,6 +1104,10 @@ Past Conversation (If any):
             # Step 3: Call OpenAI's chat completion API
             if self.use_azure_openai:
                 # For Azure OpenAI, use the deployment name as the model
+                print("\n===== SYSTEM PROMPT =====\n")
+                print(system_prompt.format(previous_conversation=previous_convo_string))
+                print("\n===== USER PROMPT =====\n")
+                print(user_prompt)
                 response = self.openai_chat_client.chat.completions.create(
                     model=self.azure_openai_chat_deployment,
                     messages=[
