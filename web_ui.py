@@ -14,6 +14,19 @@ from difflib import SequenceMatcher
 
 from collections import defaultdict
 
+from io import BytesIO
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
+from flask import send_file
+try:
+    import fitz
+except ImportError:
+    print("PyMuPDF not found. Installing...")
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "PyMuPDF"])
+    import fitz
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -315,6 +328,348 @@ def user_sessions():
     sessions = get_user_sessions(user_id)
     return jsonify({"sessions": sessions})
 
+# @app.route("/view_highlights", methods=["POST"])
+# def view_highlights():
+#     try:
+#         source = request.get_json()
+#         if not source:
+#             return jsonify({"error": "No data provided"}), 400
+        
+#         print(f"View highlights request: {source}")
+#         print(f"Filename: {source.get('filename')}")
+#         print(f"Page number: {source.get('page_number')}")
+#         print(f"Content length: {len(source.get('content', ''))}")
+        
+#         # Validate required fields
+#         if not source.get("filename") or not source.get("page_number") or not source.get("content"):
+#             missing_fields = []
+#             if not source.get("filename"):
+#                 missing_fields.append("filename")
+#             if not source.get("page_number"):
+#                 missing_fields.append("page_number")
+#             if not source.get("content"):
+#                 missing_fields.append("content")
+#             return jsonify({"error": f"Missing required fields: {', '.join(missing_fields)}"}), 400
+        
+#         # Check if RAG pipeline is initialized
+#         if not rag_pipeline:
+#             return jsonify({"error": "RAG pipeline not initialized"}), 500
+        
+#         final_sources = []
+#         try:
+#             blob_client = rag_pipeline.blob_service_client.get_blob_client(
+#                 container=rag_pipeline.blob_container_name, blob=source["filename"]
+#             )
+#             # Download the PDF content from blob storage
+#             pdf_content = blob_client.download_blob().readall()
+#         except Exception as e:
+#             print(f"Error accessing blob storage: {str(e)}")
+#             return jsonify({"error": f"Error accessing PDF file: {str(e)}"}), 500
+
+#         target_page=int(source["page_number"])-1
+
+#         # Create a BytesIO object to read the PDF content
+#         try:
+#             doc = fitz.open(stream=pdf_content, filetype="pdf")
+#         except Exception as e:
+#             print(f"Error opening PDF: {str(e)}")
+#             return jsonify({"error": f"Error processing PDF: {str(e)}"}), 500
+#         found = False
+        
+#         try:
+#             for page_num, page in enumerate(doc):
+#                 if target_page is not None and page_num != target_page:
+#                     continue
+
+#                 # Get page text
+#                 page_text = page.get_text()
+#                 if not page_text.strip():
+#                     continue
+
+#                 # Try to find and highlight the content
+#                 try:
+#                     chunks = [source["content"]] + rag_pipeline.chunk_text(text=page_text)
+#                     vectorizer = TfidfVectorizer()
+#                     vect_text = vectorizer.fit_transform(chunks)
+#                     similarities = cosine_similarity(vect_text[0:1], vect_text[1:]).flatten()
+#                     best_match_index = similarities.argmax() + 1
+#                     similar_text = chunks[best_match_index]
+                    
+#                     # Search for the text in the page
+#                     text_instances = page.search_for(similar_text)
+#                     if text_instances:
+#                         for inst in text_instances:
+#                             highlight = page.add_highlight_annot(inst)
+#                             highlight.update()
+#                         found = True
+#                         print(f"Successfully highlighted text on page {page_num + 1}")
+#                         break
+#                     else:
+#                         print(f"No text instances found on page {page_num + 1}")
+#                 except Exception as e:
+#                     print(f"Error highlighting on page {page_num + 1}: {str(e)}")
+#                     # Continue to next page if highlighting fails
+#                     continue
+#         except Exception as e:
+#             print(f"Error in highlighting process: {str(e)}")
+#             # Continue without highlighting
+
+#         try:
+#             output_pdf_io = BytesIO()
+#             doc.save(output_pdf_io)
+#             doc.close()
+#             output_pdf_io.seek(0)
+#         except Exception as e:
+#             print(f"Error saving PDF: {str(e)}")
+#             return jsonify({"error": f"Error saving PDF: {str(e)}"}), 500
+        
+#         # Create response with page number in header
+#         response = send_file(
+#             output_pdf_io,
+#             mimetype='application/pdf',
+#             as_attachment=False,
+#             download_name=source["filename"]
+#         )
+#         response.headers['X-Page-Number'] = str(target_page+1)
+        
+#         if found:
+#             print("Returning highlighted PDF")
+#         else:
+#             print("Returning PDF without highlighting (highlighting failed)")
+        
+#         return response
+#     except Exception as e:
+#         print(f"Error in first attempt: {str(e)}")
+#         try:
+#             blob_client = rag_pipeline.blob_service_client.get_blob_client(
+#                 container=rag_pipeline.blob_container_name, blob=source["filename"]
+#             )
+#             # Download the PDF content from blob storage
+#             pdf_content = blob_client.download_blob().readall()
+
+#             target_page=int(source["page_number"])-1
+
+#             # Create a BytesIO object to read the PDF content
+#             doc = fitz.open(stream=pdf_content, filetype="pdf")
+#             output_pdf_io = BytesIO()
+#             doc.save(output_pdf_io)
+#             doc.close()
+#             output_pdf_io.seek(0)
+#             # Create response with page number in header
+#             response = send_file(
+#                 output_pdf_io,
+#                 mimetype='application/pdf',
+#                 as_attachment=False,
+#                 download_name=source["filename"]
+#             )
+#             response.headers['X-Page-Number'] = str(target_page+1)
+#         except Exception as e2:
+#             print(f"Error in second attempt: {str(e2)}")
+#             # Final fallback - just return the original PDF without highlighting
+#             blob_client = rag_pipeline.blob_service_client.get_blob_client(
+#                 container=rag_pipeline.blob_container_name, blob=source["filename"]
+#             )
+#             # Download the PDF content from blob storage
+#             pdf_content = blob_client.download_blob().readall()
+
+#             target_page=int(source["page_number"])-1
+
+#             # Create a BytesIO object to read the PDF content
+#             doc = fitz.open(stream=pdf_content, filetype="pdf")
+#             output_pdf_io = BytesIO()
+#             doc.save(output_pdf_io)
+#             doc.close()
+#             output_pdf_io.seek(0)
+#             # Create response with page number in header
+#             response = send_file(
+#                 output_pdf_io,
+#                 mimetype='application/pdf',
+#                 as_attachment=False,
+#                 download_name=source["filename"]
+#             )
+#         return response
+#     except Exception as e:
+#         print(f"Error in view_highlights: {str(e)}")
+#         # Try to return a simple error response
+#         try:
+#             return jsonify({"error": f"Error processing highlights: {str(e)}"}), 500
+#         except:
+#             # If even JSON response fails, return a simple text response
+#             return f"Error processing highlights: {str(e)}", 500
+
+
+@app.route("/view_highlights", methods=["POST"])
+def view_highlights():
+    try:
+        source = request.get_json()
+        if not source:
+            return jsonify({"error": "No data provided"}), 400
+        
+        print(f"View highlights request: {source}")
+        print(f"Filename: {source.get('filename')}")
+        print(f"Page number: {source.get('page_number')}")
+        print(f"Content length: {len(source.get('content', ''))}")
+        
+        # Validate required fields
+        if not source.get("filename") or not source.get("page_number") or not source.get("content"):
+            missing_fields = []
+            if not source.get("filename"):
+                missing_fields.append("filename")
+            if not source.get("page_number"):
+                missing_fields.append("page_number")
+            if not source.get("content"):
+                missing_fields.append("content")
+            return jsonify({"error": f"Missing required fields: {', '.join(missing_fields)}"}), 400
+        
+        # Check if RAG pipeline is initialized
+        if not rag_pipeline:
+            return jsonify({"error": "RAG pipeline not initialized"}), 500
+        
+        all_content = source["content"]
+        all_pages = source["page_number"]
+
+
+        try:
+            blob_client = rag_pipeline.blob_service_client.get_blob_client(
+                container=rag_pipeline.blob_container_name, blob=source["filename"]
+            )
+            # Download the PDF content from blob storage
+            pdf_content = blob_client.download_blob().readall()
+        except Exception as e:
+            print(f"Error accessing blob storage: {str(e)}")
+            return jsonify({"error": f"Error accessing PDF file: {str(e)}"}), 500
+        
+        # Create a BytesIO object to read the PDF content
+        try:
+            doc = fitz.open(stream=pdf_content, filetype="pdf")
+        except Exception as e:
+            print(f"Error opening PDF: {str(e)}")
+            return jsonify({"error": f"Error processing PDF: {str(e)}"}), 500
+        found = False
+
+        for idx, content in enumerate(all_content):
+
+            target_page = all_pages[idx] - 1
+            try:
+                for page_num, page in enumerate(doc):
+                    if target_page is not None and page_num != target_page:
+                        continue
+
+                    # Get page text
+                    page_text = page.get_text()
+                    if not page_text.strip():
+                        continue
+
+                    # Try to find and highlight the content
+                    try:
+                        chunks = [content] + rag_pipeline.chunk_text(text=page_text)
+                        vectorizer = TfidfVectorizer()
+                        vect_text = vectorizer.fit_transform(chunks)
+                        similarities = cosine_similarity(vect_text[0:1], vect_text[1:]).flatten()
+                        best_match_index = similarities.argmax() + 1
+                        similar_text = chunks[best_match_index]
+                        
+                        # Search for the text in the page
+                        text_instances = page.search_for(similar_text)
+                        if text_instances:
+                            for inst in text_instances:
+                                highlight = page.add_highlight_annot(inst)
+                                highlight.update()
+                            found = True
+                            print(f"Successfully highlighted text on page {page_num + 1}")
+                            break
+                        else:
+                            print(f"No text instances found on page {page_num + 1}")
+                    except Exception as e:
+                        print(f"Error highlighting on page {page_num + 1}: {str(e)}")
+                        # Continue to next page if highlighting fails
+                        continue
+            except Exception as e:
+                print(f"Error in highlighting process: {str(e)}")
+                # Continue without highlighting
+
+        try:
+            output_pdf_io = BytesIO()
+            doc.save(output_pdf_io)
+            doc.close()
+            output_pdf_io.seek(0)
+        except Exception as e:
+            print(f"Error saving PDF: {str(e)}")
+            return jsonify({"error": f"Error saving PDF: {str(e)}"}), 500
+        
+        # Create response with page number in header
+        response = send_file(
+            output_pdf_io,
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name=source["filename"]
+        )
+        response.headers['X-Page-Number'] = str(all_pages[0])
+        
+        if found:
+            print("Returning highlighted PDF")
+        else:
+            print("Returning PDF without highlighting (highlighting failed)")
+        
+        return response
+    except Exception as e:
+        print(f"Error in first attempt: {str(e)}")
+        try:
+            blob_client = rag_pipeline.blob_service_client.get_blob_client(
+                container=rag_pipeline.blob_container_name, blob=source["filename"]
+            )
+            # Download the PDF content from blob storage
+            pdf_content = blob_client.download_blob().readall()
+
+            target_page=int(source["page_number"])-1
+
+            # Create a BytesIO object to read the PDF content
+            doc = fitz.open(stream=pdf_content, filetype="pdf")
+            output_pdf_io = BytesIO()
+            doc.save(output_pdf_io)
+            doc.close()
+            output_pdf_io.seek(0)
+            # Create response with page number in header
+            response = send_file(
+                output_pdf_io,
+                mimetype='application/pdf',
+                as_attachment=False,
+                download_name=source["filename"]
+            )
+            response.headers['X-Page-Number'] = str(target_page+1)
+        except Exception as e2:
+            print(f"Error in second attempt: {str(e2)}")
+            # Final fallback - just return the original PDF without highlighting
+            blob_client = rag_pipeline.blob_service_client.get_blob_client(
+                container=rag_pipeline.blob_container_name, blob=source["filename"]
+            )
+            # Download the PDF content from blob storage
+            pdf_content = blob_client.download_blob().readall()
+
+            target_page=int(source["page_number"])-1
+
+            # Create a BytesIO object to read the PDF content
+            doc = fitz.open(stream=pdf_content, filetype="pdf")
+            output_pdf_io = BytesIO()
+            doc.save(output_pdf_io)
+            doc.close()
+            output_pdf_io.seek(0)
+            # Create response with page number in header
+            response = send_file(
+                output_pdf_io,
+                mimetype='application/pdf',
+                as_attachment=False,
+                download_name=source["filename"]
+            )
+        return response
+    except Exception as e:
+        print(f"Error in view_highlights: {str(e)}")
+        # Try to return a simple error response
+        try:
+            return jsonify({"error": f"Error processing highlights: {str(e)}"}), 500
+        except:
+            # If even JSON response fails, return a simple text response
+            return f"Error processing highlights: {str(e)}", 500
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -356,22 +711,33 @@ def chat():
             result = {}
             # if "reference" in response["answer"].lower():
             result = extract_refs_dict(response["answer"])
+            print("Results : ", result)
             # print(response["source_documents"])
             # print(result)
-            relevant_sources = []
+            relevant_sources = {}
             seen_files = set()
 
             for filename in result:
                 cleaned_source_filename = filename.split("/")[-1].strip()
+                allowed_pages = result[filename]
                 for doc in response["source_documents"]:
                     cleaned_retrieved_filename = doc["filename"].split("/")[-1].strip()
+                    page_number = doc["page_number"]
                     if (
-                        cleaned_retrieved_filename == cleaned_source_filename
-                        and cleaned_source_filename not in seen_files
+                        (cleaned_retrieved_filename == cleaned_source_filename) and (page_number in allowed_pages)
                     ):
-                        relevant_sources.append(doc)
-                        seen_files.add(cleaned_source_filename)
-                        break
+                        if cleaned_retrieved_filename in relevant_sources:
+                            relevant_sources[cleaned_retrieved_filename]["content"].append(doc["content"])
+                            relevant_sources[cleaned_retrieved_filename]["page_number"].append(doc["page_number"])
+                            print(relevant_sources[cleaned_retrieved_filename]["page_number"])
+                        else:
+                            relevant_sources[cleaned_retrieved_filename] = doc
+                            relevant_sources[cleaned_retrieved_filename]["content"] = [doc["content"]]
+                            relevant_sources[cleaned_retrieved_filename]["page_number"] = [doc["page_number"]]
+                        # relevant_sources.append(doc)
+                        # seen_files.add(cleaned_source_filename)
+            relevant_sources = [relevant_sources[file_name] for file_name in relevant_sources]
+                        
 
             # print(relevant_sources)
             # print("To Consider : ", to_consider)
@@ -547,6 +913,28 @@ def health():
     return jsonify(
         {"status": "healthy", "pipeline_initialized": rag_pipeline is not None}
     )
+
+@app.route("/test_highlights")
+def test_highlights():
+    """Test endpoint for PDF highlighting"""
+    try:
+        # Test if fitz is working
+        import fitz
+        fitz_status = "PyMuPDF (fitz) is available"
+    except ImportError as e:
+        fitz_status = f"PyMuPDF (fitz) import error: {str(e)}"
+    
+    try:
+        # Test if RAG pipeline is available
+        rag_status = "RAG pipeline is available" if rag_pipeline else "RAG pipeline is not available"
+    except Exception as e:
+        rag_status = f"RAG pipeline error: {str(e)}"
+    
+    return jsonify({
+        "fitz_status": fitz_status,
+        "rag_status": rag_status,
+        "pipeline_initialized": rag_pipeline is not None
+    })
 
 
 @app.route("/session_messages")

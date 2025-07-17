@@ -1,3 +1,32 @@
+import logging
+from openai import AzureOpenAI
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+logging.basicConfig(
+    filename="logs.log",
+    filemode="a",
+    format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+logger.info("Logger Initialised..")
+
+
+azure_openai_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+azure_openai_api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+azure_openai_chat_deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+
+openai_client = AzureOpenAI(
+    api_key=azure_openai_api_key,
+    azure_endpoint=azure_openai_endpoint,
+    api_version=azure_openai_api_version,
+)
+
+
 def _query_rephrase_prompt(
     query: str,
     previous_conversation: str,
@@ -40,3 +69,28 @@ Here is the current user query which you can you use to under previous question 
     messages.append({"role": "system", "content": prompt})
     messages.append({"role": "user", "content": f"""Query: {query}"""})
     return messages
+
+
+async def is_language_query(query: str) -> bool:
+    """
+    Detect if a query is about English/language/literature/word meanings
+    """
+    check_prompt = f"""Question: "{query}"\nIs this question about English language, grammar, literature, or word meanings? Answer only "Yes" or "No"."""
+
+    messages = [
+        {"role": "system", "content": "You are an intent classifier."},
+        {"role": "user", "content": check_prompt},
+    ]
+
+    try:
+        response = openai_client.chat.completions.create(
+            model=(azure_openai_chat_deployment),
+            messages=messages,
+            max_tokens=3,
+            temperature=0.0,
+        )
+        intent = response.choices[0].message.content.strip().lower()
+        return intent == "yes"
+    except Exception as e:
+        logger.error(f"Intent classification failed: {str(e)}")
+        return False  # fallback to allow the query if uncertain

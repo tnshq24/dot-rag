@@ -1718,21 +1718,116 @@
                         refsSpan.style.color = '#1a3a5d';
                         refsSpan.innerHTML = '<strong>References:</strong> ';
                         sourceDocuments.forEach((doc, idx) => {
-                            if (doc.view_url) {
-                                const link = document.createElement('a');
-                                link.href = replacePath(doc.view_url);
-                                link.target = '_blank';
-                                link.style.color = '#1a3a5d';
-                                link.style.textDecoration = 'underline';
-                                link.style.marginRight = '12px';
-                                link.textContent = getFilenameOnly(doc.filename);
-                                refsSpan.appendChild(link);
-                            } else {
-                                const span = document.createElement('span');
-                                span.style.color = '#888';
-                                span.textContent = getFilenameOnly(doc.filename);
-                                refsSpan.appendChild(span);
-                            }
+                            console.log(JSON.stringify(doc));
+                            
+                            // Create a link that will open the highlighted PDF
+                            const link = document.createElement('a');
+                            link.href = '#';
+                            link.target = '_blank';
+                            link.style.color = '#1a3a5d';
+                            link.style.textDecoration = 'underline';
+                            link.style.marginRight = '12px';
+                            link.style.cursor = 'pointer';
+                            link.textContent = getFilenameOnly(doc.filename);
+                            
+                            // Add click handler to fetch and display highlighted PDF
+                            link.addEventListener('click', async (e) => {
+                                e.preventDefault();
+                                
+                                console.log('Opening highlighted PDF for:', doc);
+                                console.log('Request payload:', JSON.stringify(doc));
+                                
+                                // Show loading state
+                                const originalText = link.textContent;
+                                link.textContent = 'Loading...';
+                                link.style.opacity = '0.7';
+                                
+                                try {
+                                    const response = await fetch('/view_highlights', {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify(doc)
+                                    });
+                                    
+                                    console.log('Response status:', response.status);
+                                    
+                                                                            if (response.ok) {
+                                            // Check if the response is actually a PDF
+                                            const contentType = response.headers.get('content-type');
+                                            if (contentType && contentType.includes('application/pdf')) {
+                                                // Create a blob from the PDF response
+                                                const blob = await response.blob();
+                                                const url = window.URL.createObjectURL(blob);
+                                                
+                                                // Get the page number from response headers
+                                                const pageNumber = response.headers.get('X-Page-Number');
+                                                console.log('Page number from response:', pageNumber);
+                                                
+                                                // Add page number to URL if available
+                                                let finalUrl = url;
+                                                if (pageNumber) {
+                                                    finalUrl = url + '#page=' + pageNumber;
+                                                    console.log('Final URL with page number:', finalUrl);
+                                                }
+                                                
+                                                console.log('Created blob URL:', url);
+                                                
+                                                // Open the PDF in a new window/tab
+                                                const newWindow = window.open(finalUrl, '_blank');
+                                                
+                                                if (!newWindow) {
+                                                    alert('Please allow pop-ups to view the highlighted PDF');
+                                                } else {
+                                                    // Add a small delay to ensure the window opens properly
+                                                    setTimeout(() => {
+                                                        if (newWindow.closed) {
+                                                            console.log('PDF window was closed');
+                                                        }
+                                                    }, 100);
+                                                }
+                                                
+                                                // Clean up the blob URL after a delay
+                                                setTimeout(() => {
+                                                    window.URL.revokeObjectURL(url);
+                                                }, 1000);
+                                            } else {
+                                                // Response is not a PDF, try to get error message
+                                                const text = await response.text();
+                                                console.error('Response is not a PDF:', text);
+                                                alert('Failed to load highlighted PDF: Response is not a PDF file');
+                                            }
+                                    } else {
+                                        // Try to get error message from response
+                                        let errorMessage = 'Unknown error';
+                                        try {
+                                            const errorData = await response.json();
+                                            errorMessage = errorData.error || 'Unknown error';
+                                        } catch (e) {
+                                            // If JSON parsing fails, try to get text
+                                            try {
+                                                const text = await response.text();
+                                                errorMessage = text.substring(0, 100) + '...';
+                                            } catch (e2) {
+                                                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                                            }
+                                        }
+                                        console.error('Failed to fetch highlighted PDF:', errorMessage);
+                                        alert('Failed to load highlighted PDF: ' + errorMessage);
+                                    }
+                                } catch (error) {
+                                    console.error('Error fetching highlighted PDF:', error);
+                                    alert('Error loading highlighted PDF: ' + error.message);
+                                } finally {
+                                    // Restore original state
+                                    link.textContent = originalText;
+                                    link.style.opacity = '1';
+                                }
+                            });
+                            
+                            refsSpan.appendChild(link);
+                            
                             if (idx < sourceDocuments.length - 1) {
                                 const comma = document.createElement('span');
                                 comma.textContent = ', ';
@@ -1817,9 +1912,7 @@
             });
         }
 
-        function replacePath(originalPath) {
-            return originalPath.replace(/^\/view_pdf\/([^/]+)\/([^/]+)\//, '/view_pdf/$1@$2@');
-        }
+
 
         function getFilenameOnly(fullPath) {
             const parts = fullPath.split('/');
