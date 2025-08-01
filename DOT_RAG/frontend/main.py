@@ -21,7 +21,7 @@ from flask_cors import CORS
 # Configure CORS to allow credentials and specific origin
 CORS(app, 
      resources={r"/*": {
-         "origins": ["http://localhost:3000"],  # Next.js development server
+         "origins": ["*"],  # Next.js development server
          "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
          "allow_headers": ["Content-Type", "Authorization"],
          "supports_credentials": True  # Important for session cookies
