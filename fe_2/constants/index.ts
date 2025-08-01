@@ -1,7 +1,7 @@
 // Application-wide constants and configuration
 
 // API Base URL pointing to Python backend
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001"
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://dot-rag-bot-3-eueaf0fsd5d2hsfx.centralindia-01.azurewebsites.net"
 
 export const API_ENDPOINTS = {
   CHECK_AUTH: `${API_BASE_URL}/check_auth`,
