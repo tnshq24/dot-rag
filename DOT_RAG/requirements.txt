@@ -14,4 +14,5 @@ pandas==2.3.1
 scikit-learn>=1.0
 PyMuPDF>=1.18.0
 tiktoken
-langchain 
+langchain
+tabulate 
