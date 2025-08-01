@@ -15,7 +15,22 @@ from DOT_RAG.backend.main import RunAzureRagPipeline
 
 
 app = Flask(__name__)
+# Configure CORS with proper settings for credentials
+from flask_cors import CORS
+
+# Configure CORS to allow credentials and specific origin
+CORS(app, 
+     resources={r"/*": {
+         "origins": ["http://localhost:3000"],  # Next.js development server
+         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         "allow_headers": ["Content-Type", "Authorization"],
+         "supports_credentials": True  # Important for session cookies
+     }})
+
 app.secret_key = os.environ.get("SECRET_KEY", "your-secret-key-here")
+
+
+
 try:
     rag_pipeline = RunAzureRagPipeline()
     print("✅ RAG pipeline initialized successfully")
@@ -230,7 +245,7 @@ def chat():
             file_names = []
             for file in response["source_documents"]:
                 file_names.append(file["filename"])
-            result = extract_refs_dict(response["references"])
+            # result = extract_refs_dict(response["references"])
             result_v2 = extract_refs_dict_v2(response["references"])
 
             #print("Results : ", result)
@@ -419,4 +434,4 @@ def available_files():
 
 if __name__ == "__main__":
     # Run the Flask app
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5001)

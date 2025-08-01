@@ -15,12 +15,15 @@ logging.getLogger("azure").setLevel(logging.WARNING)
 logging.getLogger("azure.core.pipeline").setLevel(logging.WARNING)
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
 
+
 from typing import Any, Dict
 import uuid
+
 
 from DOT_RAG.backend.azure_ai_service import AzureAIService
 from DOT_RAG.backend.azure_cosmos import AzureCosmos
 from DOT_RAG.backend.prompts import Prompt
+
 
 
 class RunAzureRagPipeline(AzureAIService, AzureCosmos, Prompt):
