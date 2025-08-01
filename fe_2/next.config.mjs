@@ -1,3 +1,5 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -9,11 +11,9 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Environment variables
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001',
   },
-  // Configure CORS and proxy settings
   async headers() {
     return [
       {
@@ -25,8 +25,12 @@ const nextConfig = {
           { key: 'Access-Control-Allow-Headers', value: 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version' },
         ],
       },
-    ]
+    ];
   },
-}
+  webpack: (config) => {
+    config.resolve.alias['@'] = path.resolve(__dirname);
+    return config;
+  },
+};
 
-export default nextConfig
+module.exports = nextConfig;
