@@ -320,6 +320,44 @@ class RunAzureRagPipeline(AzureAIService, AzureCosmos, Prompt):
 
 
 
+# === FastAPI app setup ===
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI()
+pipeline = RunAzureRagPipeline()
+
+# Enable CORS (replace "*" with your Vercel URL in production)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def health_check():
+    return {"status": "Backend is running"}
+
+@app.post("/query")
+async def query_handler(payload: dict):
+    try:
+        response = await pipeline.query(
+            question=payload.get("question"),
+            user_id=payload.get("user_id"),
+            conversation_id=payload.get("conversation_id"),
+            session_id=payload.get("session_id"),
+            file_name=payload.get("file_name"),
+            project_code=payload.get("project_code"),
+            top_k=payload.get("top_k", 8),
+        )
+        return JSONResponse(content=response)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 
 
 if __name__ == "__main__":
