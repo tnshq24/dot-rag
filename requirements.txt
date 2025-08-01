@@ -16,3 +16,4 @@ PyMuPDF>=1.18.0
 tiktoken
 langchain 
 tabulate
+fastapi
