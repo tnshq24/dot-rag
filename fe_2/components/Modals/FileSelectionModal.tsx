@@ -3,7 +3,7 @@
 // File selection modal component following Single Responsibility Principle
 
 import { useState, useEffect } from "react"
-import { FileText } from "lucide-react"
+import { FileText, X } from "lucide-react"
 import { Modal } from "@/components/common/Modal"
 import { Button } from "@/components/common/Button"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
@@ -19,6 +19,7 @@ interface FileSelectionModalProps {
   loading: boolean
   onLoadFiles: () => Promise<void>
   onSelectFile: (filename: string) => void
+  onClearSelection: () => void
   onConfirm: () => void
 }
 
@@ -30,6 +31,7 @@ export function FileSelectionModal({
   loading,
   onLoadFiles,
   onSelectFile,
+  onClearSelection,
   onConfirm,
 }: FileSelectionModalProps) {
   const [localSelectedFile, setLocalSelectedFile] = useState<string | null>(selectedFile)
@@ -45,9 +47,15 @@ export function FileSelectionModal({
     setLocalSelectedFile(filename)
   }
 
+  const handleClearSelection = () => {
+    setLocalSelectedFile(null)
+  }
+
   const handleConfirm = () => {
     if (localSelectedFile) {
       onSelectFile(localSelectedFile)
+    } else {
+      onClearSelection()
     }
     onConfirm()
   }
@@ -60,6 +68,25 @@ export function FileSelectionModal({
   return (
     <Modal isOpen={isOpen} onClose={handleCancel} title="Select a File to Chat With" size="md">
       <div className="space-y-4">
+        {/* Current Selection Display */}
+        {selectedFile && (
+          <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Currently selected: {getFilenameOnly(selectedFile)}</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClearSelection}
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+              title="Clear selection"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+
         {/* File List */}
         <div className="max-h-80 overflow-y-auto space-y-2">
           {loading ? (
@@ -94,7 +121,9 @@ export function FileSelectionModal({
 
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{getFilenameOnly(file.value)}</p>
-                  <p className="text-xs text-muted-foreground truncate">{file.value}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {file.value} • {file.count} chunks
+                  </p>
                 </div>
               </div>
             ))
@@ -106,8 +135,8 @@ export function FileSelectionModal({
           <Button variant="secondary" onClick={handleCancel} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={handleConfirm} disabled={!localSelectedFile || loading}>
-            Confirm File
+          <Button onClick={handleConfirm} disabled={loading}>
+            {localSelectedFile ? "Confirm File" : "Clear Selection"}
           </Button>
         </div>
       </div>

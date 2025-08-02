@@ -195,6 +195,7 @@ export default function ChatbotPage() {
         loading={filesLoading}
         onLoadFiles={loadAvailableFiles}
         onSelectFile={selectFile}
+        onClearSelection={clearSelection}
         onConfirm={handleFileSelectionConfirm}
       />
     </div>

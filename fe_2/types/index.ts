@@ -29,7 +29,7 @@ export interface ChatSession {
 
 export interface FileItem {
   value: string
-  label: string
+  count: number
 }
 
 export interface ChatRequest {
