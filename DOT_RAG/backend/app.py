@@ -12,10 +12,10 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from frontend.utility import (authenticate_user, generate_user_id,
+from DOT_RAG.frontend.utility import (authenticate_user, generate_user_id,
                                                extract_refs_dict,
                                                get_relevant_sources, get_highlighted_pdf_content, extract_refs_dict_v2)
-from backend.main import RunAzureRagPipeline
+from DOT_RAG.backend.main import RunAzureRagPipeline
 
 app = Flask(__name__)
 
