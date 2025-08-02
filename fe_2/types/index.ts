@@ -5,12 +5,6 @@ export interface User {
   email: string
 }
 
-export interface AuthState {
-  isAuthenticated: boolean
-  user: User | null
-  isAdmin: boolean
-}
-
 export interface ChatMessage {
   id: string
   content: string
@@ -63,10 +57,7 @@ export interface ModalState {
   isOpen: boolean
 }
 
-export interface LoginFormData {
-  email: string
-  password: string
-}
+
 
 // API response types
 export interface ApiResponse<T = any> {

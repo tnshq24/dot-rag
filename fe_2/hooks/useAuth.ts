@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { authService } from "@/services/api"
-import type { AuthState, LoginFormData } from "@/types"
+import type { AuthState, LoginFormData } from "@/utils/auth"
 
 interface UseAuthReturn extends AuthState {
   login: (credentials: LoginFormData) => Promise<{ success: boolean; error?: string }>

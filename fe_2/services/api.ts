@@ -1,9 +1,9 @@
 // API service layer following Dependency Inversion Principle
 
 import { API_ENDPOINTS } from "@/constants"
+import { TokenManager } from "@/utils/auth"
 import type {
   ApiResponse,
-  AuthState,
   ChatRequest,
   ChatResponse,
   ChatSession,
@@ -11,12 +11,12 @@ import type {
   UserSessionsResponse,
   AvailableFilesResponse,
   SourceDocument,
-  LoginFormData,
   UploadFormData,
   UploadResponse,
   PdfHighlightRequest,
   HealthResponse,
 } from "@/types"
+import type { AuthState, LoginFormData } from "@/utils/auth"
 
 /**
  * Base API service class implementing common HTTP operations
@@ -24,12 +24,14 @@ import type {
 class BaseApiService {
   protected async request<T>(url: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...TokenManager.getAuthHeader(),
+        ...options.headers,
+      }
+
       const response = await fetch(url, {
-        credentials: 'include', // Include cookies for session management
-        headers: {
-          "Content-Type": "application/json",
-          ...options.headers,
-        },
+        headers,
         ...options,
       })
 
@@ -50,9 +52,13 @@ class BaseApiService {
 
   protected async uploadRequest<T>(url: string, formData: FormData): Promise<ApiResponse<T>> {
     try {
+      const headers: Record<string, string> = {
+        ...TokenManager.getAuthHeader(),
+      }
+
       const response = await fetch(url, {
         method: "POST",
-        credentials: 'include', // Include cookies for session management
+        headers,
         body: formData,
       })
 
@@ -77,6 +83,19 @@ class BaseApiService {
  */
 export class AuthService extends BaseApiService {
   async checkAuthStatus(): Promise<ApiResponse<AuthState>> {
+    // If no token or invalid token, return not authenticated
+    if (!TokenManager.isAuthenticated()) {
+      TokenManager.removeToken()
+      return {
+        success: true,
+        data: {
+          isAuthenticated: false,
+          user: null,
+          isAdmin: false,
+        },
+      }
+    }
+
     const result = await this.request<any>(API_ENDPOINTS.CHECK_AUTH)
 
     if (result.success && result.data) {
@@ -95,7 +114,16 @@ export class AuthService extends BaseApiService {
       }
     }
 
-    return result
+    // If check_auth fails, clear token and return not authenticated
+    TokenManager.removeToken()
+    return {
+      success: true,
+      data: {
+        isAuthenticated: false,
+        user: null,
+        isAdmin: false,
+      },
+    }
   }
 
   async login(credentials: LoginFormData): Promise<ApiResponse<AuthState>> {
@@ -104,7 +132,10 @@ export class AuthService extends BaseApiService {
       body: JSON.stringify(credentials),
     })
 
-    if (result.success && result.data) {
+    if (result.success && result.data && result.data.token) {
+      // Store the JWT token
+      TokenManager.setToken(result.data.token)
+      
       return {
         success: true,
         data: {
@@ -122,9 +153,14 @@ export class AuthService extends BaseApiService {
   }
 
   async logout(): Promise<ApiResponse<void>> {
-    return this.request<void>(API_ENDPOINTS.LOGOUT, {
+    const result = await this.request<void>(API_ENDPOINTS.LOGOUT, {
       method: "POST",
     })
+    
+    // Always clear the token on logout
+    TokenManager.removeToken()
+    
+    return result
   }
 }
 
@@ -190,12 +226,14 @@ export class FileService extends BaseApiService {
 
   async viewHighlights(document: SourceDocument): Promise<{ blob: Blob; pageNumber?: string } | null> {
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...TokenManager.getAuthHeader(),
+      }
+
       const response = await fetch(API_ENDPOINTS.VIEW_HIGHLIGHTS, {
         method: "POST",
-        credentials: 'include',
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify(document),
       })
 
@@ -217,9 +255,13 @@ export class FileService extends BaseApiService {
 
   async viewPDF(blobName: string): Promise<Blob | null> {
     try {
+      const headers: Record<string, string> = {
+        ...TokenManager.getAuthHeader(),
+      }
+
       const encodedBlobName = blobName.replace("/", "@")
       const response = await fetch(`${API_ENDPOINTS.VIEW_PDF}/${encodedBlobName}`, {
-        credentials: 'include',
+        headers,
       })
 
       if (response.ok) {
