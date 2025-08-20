@@ -540,7 +540,26 @@
             border-color: #1a3a5d;
         }
 
-        .file-radio {
+        .file-item.disabled {
+            background-color: #2a2b32;
+            border-color: #3a3b42;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .file-item.disabled:hover {
+            background-color: #2a2b32;
+        }
+
+        .file-item.disabled .file-name {
+            color: #6b6c7b;
+        }
+
+        .file-item.disabled .file-checkbox {
+            opacity: 0.3;
+        }
+
+        .file-checkbox {
             margin-right: 12px;
             width: 18px;
             height: 18px;
@@ -1203,13 +1222,16 @@
     <div class="file-selection-modal" id="fileSelectionModal">
         <div class="file-selection-container">
             <button class="close-file-selection-modal" id="closeFileSelectionModalBtn" aria-label="Close file selection" title="Close">&times;</button>
-            <div class="file-selection-title">Select a File to Chat With</div>
+            <div class="file-selection-title">Select Files to Chat With (Max 2)</div>
+            <div style="color: #ececf1; text-align: center; margin-bottom: 16px; font-size: 14px;">
+                Selected: <span id="selectionCount">0</span>/2
+            </div>
             <div class="file-list" id="fileList">
                 <!-- Files will be loaded here -->
             </div>
             <div class="file-selection-actions">
                 <button type="button" class="file-selection-btn secondary" id="cancelFileSelectionBtn">Cancel</button>
-                <button type="button" class="file-selection-btn primary" id="confirmFileSelectionBtn">Confirm File</button>
+                <button type="button" class="file-selection-btn primary" id="confirmFileSelectionBtn">Confirm Files</button>
             </div>
         </div>
     </div>
@@ -1227,7 +1249,7 @@
         // Add a global isAdmin flag
         let isAdmin = false;
         // File selection variables
-        let selectedFile = null; // Changed to single file selection
+        let selectedFiles = []; // Changed to multiple file selection (max 2)
         let availableFiles = [];
 
         // DOM elements
@@ -1503,7 +1525,7 @@
             activeSessionId = currentSessionId;
             
             // Clear selected files for new chat
-            selectedFile = null;
+            selectedFiles = [];
             updateSelectedFilesDisplay();
             
             clearMessages();
@@ -1605,7 +1627,7 @@
                     activeSessionId = sessionId;
                     
                     // Clear selected files when loading existing session
-                    selectedFile = null;
+                    selectedFiles = [];
                     updateSelectedFilesDisplay();
                     
                     highlightActiveSession();
@@ -1695,7 +1717,7 @@
                 
                 currentUser = null;
                 isAuthenticated = false;
-                selectedFile = null;
+                selectedFiles = [];
                 updateSelectedFilesDisplay();
                 updateUIForUnauthenticatedUser();
                 clearMessages();
@@ -1775,11 +1797,10 @@
                 fileItem.className = 'file-item';
                 fileItem.dataset.filename = file.value;
                 
-                const radio = document.createElement('input');
-                radio.type = 'radio';
-                radio.name = 'fileSelection';
-                radio.className = 'file-radio';
-                radio.checked = selectedFile === file.value;
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'file-checkbox';
+                checkbox.checked = selectedFiles.includes(file.value);
                 
                 const fileName = document.createElement('span');
                 fileName.className = 'file-name';
@@ -1787,26 +1808,78 @@
                 console.log('Filename only:', getFilenameOnly(file.value));
                 fileName.textContent = getFilenameOnly(file.value);
                 
-                fileItem.appendChild(radio);
+                fileItem.appendChild(checkbox);
                 fileItem.appendChild(fileName);
                 
-                // Add click handler for single selection
+                // Add click handler for multiple selection
                 fileItem.addEventListener('click', (e) => {
-                    if (e.target !== radio) {
-                        radio.checked = true;
+                    if (e.target === checkbox) {
+                        // Checkbox was clicked directly
+                        if (checkbox.checked) {
+                            // Unchecking
+                            checkbox.checked = false;
+                            selectedFiles = selectedFiles.filter(f => f !== file.value);
+                            fileItem.classList.remove('selected');
+                        } else {
+                            // Checking
+                            if (selectedFiles.length < 2) {
+                                checkbox.checked = true;
+                                selectedFiles.push(file.value);
+                                fileItem.classList.add('selected');
+                            }
+                        }
+                    } else {
+                        // File item was clicked (not checkbox)
+                        if (checkbox.checked) {
+                            // Unchecking
+                            checkbox.checked = false;
+                            selectedFiles = selectedFiles.filter(f => f !== file.value);
+                            fileItem.classList.remove('selected');
+                        } else {
+                            // Checking
+                            if (selectedFiles.length < 2) {
+                                checkbox.checked = true;
+                                selectedFiles.push(file.value);
+                                fileItem.classList.add('selected');
+                            }
+                        }
                     }
                     
-                    // Uncheck all other radios
-                    document.querySelectorAll('.file-radio').forEach(r => r.checked = false);
-                    document.querySelectorAll('.file-item').forEach(item => item.classList.remove('selected'));
-                    
-                    // Check this radio and select this file
-                    radio.checked = true;
-                    selectedFile = file.value;
-                    fileItem.classList.add('selected');
+                    // Update disabled state for all files
+                    updateFileSelectionState();
                 });
                 
                 fileList.appendChild(fileItem);
+            });
+            
+            // Initial state update
+            updateFileSelectionState();
+        }
+
+        // Update file selection state (enable/disable files based on selection count)
+        function updateFileSelectionState() {
+            const fileItems = document.querySelectorAll('.file-item');
+            const maxSelection = 2;
+            const selectionCountElement = document.getElementById('selectionCount');
+            
+            // Update selection count display
+            if (selectionCountElement) {
+                selectionCountElement.textContent = selectedFiles.length;
+            }
+            
+            fileItems.forEach(item => {
+                const checkbox = item.querySelector('.file-checkbox');
+                const isSelected = checkbox.checked;
+                
+                if (selectedFiles.length >= maxSelection && !isSelected) {
+                    // Disable unselected files when max is reached
+                    item.classList.add('disabled');
+                    checkbox.disabled = true;
+                } else {
+                    // Enable files when under max or if already selected
+                    item.classList.remove('disabled');
+                    checkbox.disabled = false;
+                }
             });
         }
 
@@ -1818,27 +1891,42 @@
 
         // Update the display of selected files
         function updateSelectedFilesDisplay() {
-            if (!selectedFile) {
+            if (selectedFiles.length === 0) {
                 selectedFilesDisplay.style.display = 'none';
                 return;
             }
 
             selectedFilesDisplay.innerHTML = '';
-            const fileTag = document.createElement('div');
-            fileTag.className = 'selected-file-tag';
-            const filenameOnly = getFilenameOnly(selectedFile);
-            fileTag.innerHTML = `
-                <span title="${selectedFile}">${filenameOnly}</span>
-                <button class="remove-file-btn" onclick="removeSelectedFile()">&times;</button>
-            `;
-            selectedFilesDisplay.appendChild(fileTag);
+            selectedFiles.forEach((file, index) => {
+                const fileTag = document.createElement('div');
+                fileTag.className = 'selected-file-tag';
+                const filenameOnly = getFilenameOnly(file);
+                fileTag.innerHTML = `
+                    <span title="${file}">${filenameOnly}</span>
+                    <button class="remove-file-btn" onclick="removeSelectedFile('${file}')">&times;</button>
+                `;
+                selectedFilesDisplay.appendChild(fileTag);
+            });
             selectedFilesDisplay.style.display = 'flex';
         }
 
         // Remove selected file
-        function removeSelectedFile() {
-            selectedFile = null;
+        function removeSelectedFile(fileToRemove) {
+            selectedFiles = selectedFiles.filter(f => f !== fileToRemove);
             updateSelectedFilesDisplay();
+            
+            // Update the checkbox state in the modal
+            const fileItems = document.querySelectorAll('.file-item');
+            fileItems.forEach(item => {
+                const checkbox = item.querySelector('.file-checkbox');
+                if (item.dataset.filename === fileToRemove) {
+                    checkbox.checked = false;
+                    item.classList.remove('selected');
+                }
+            });
+            
+            // Update disabled state
+            updateFileSelectionState();
         }
 
         // Validate upload form
@@ -1974,7 +2062,7 @@
                     user_id: currentUser?.user_id || '',
                     conversation_id: currentConversationId,
                     session_id: currentSessionId,
-                    file_names: selectedFile ? [selectedFile] : []  // Add selected file to the payload
+                    file_names: selectedFiles  // Add selected files to the payload
                 };
                 
                 const response = await fetch('/chat', {

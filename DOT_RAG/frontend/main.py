@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Flask, render_template, request, jsonify, session, send_file, Response
 
 from DOT_RAG.frontend.utility import (authenticate_user, generate_user_id,
-                                               extract_refs_dict,
+                                               extract_refs_dict, extract_pdf_references,
                                                get_relevant_sources, get_highlighted_pdf_content, extract_refs_dict_v2)
 # from frontend.utility import (authenticate_user, generate_user_id,
 #                                                extract_refs_dict,
@@ -125,13 +125,17 @@ def view_highlights():
         return jsonify({"error": f"Missing required fields: {', '.join(missing_fields)}"}), 400
 
     try:
-        pages_content = rag_pipeline._extract_text_from_pdf_blob(source.get("filename"))
-        if len(pages_content) == 0:
-            pages_content = rag_pipeline._extract_using_document_intelligence(
-                blob_name=source.get("filename"),
-                return_raw=True
-            )
-            source["pages_content"] = pages_content
+        # pages_content = rag_pipeline._extract_text_from_pdf_blob(source.get("filename"))
+        # if len(pages_content) == 0:
+        #     pages_content = rag_pipeline._extract_using_document_intelligence(
+        #         blob_name=source.get("filename"),
+        #         return_raw=True
+        #     )
+        pages_content = rag_pipeline._extract_using_document_intelligence(
+            blob_name=source.get("filename"),
+            return_raw=True
+        )
+        source["pages_content"] = pages_content
 
         # Check if RAG pipeline is initialized
         if not rag_pipeline:
@@ -209,16 +213,14 @@ def chat():
         asyncio.set_event_loop(loop)
 
         try:
-            # If file_names is provided, use the first one as file_name parameter
-            file_name = file_names[0] if file_names and len(file_names) > 0 else None
-            
+            # Pass the entire file_names list to the RAG pipeline
             response = loop.run_until_complete(
                 rag_pipeline.query(
                     question,
                     user_id=user_id,
                     conversation_id=conversation_id,
                     session_id=session_id,
-                    file_name=file_name,  # Pass the selected file name
+                    file_names=file_names,  # Pass all selected file names
                     top_k=8,
                 )
             )
@@ -230,11 +232,13 @@ def chat():
             file_names = []
             for file in response["source_documents"]:
                 file_names.append(file["filename"])
-            result = extract_refs_dict(response["references"])
-            result_v2 = extract_refs_dict_v2(response["references"])
+            # result = extract_refs_dict(response["references"])
+            # result_v2 = extract_refs_dict_v2(response["references"])
+            result_v2 = extract_pdf_references(response["references"])
+
 
             #print("Results : ", result)
-            #print("Results V2 : ", result_v2)
+            # print("Results V2 : ", result_v2)
 
             relevant_sources = get_relevant_sources(result=result_v2, response=response)
             # print(relevant_sources)

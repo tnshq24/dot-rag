@@ -62,6 +62,7 @@ class RunAzureRagPipeline(AzureAIService, AzureCosmos, Prompt):
         conversation_id: str,
         session_id: str,
         file_name=None,
+        file_names=None,
         project_code=None,
         top_k: int = 8,
     ) -> Dict[str, Any]:
@@ -74,6 +75,7 @@ class RunAzureRagPipeline(AzureAIService, AzureCosmos, Prompt):
             conversation_id: Unique identifier for the conversation
             session_id: Unique identifier for the session
             file_name: Name of the file being queried. If None, queries all files.
+            file_names: List of file names to query. If provided, overrides file_name.
             project_code: Code of the project being queried. If None, queries all projects.
             top_k: Number of documents to retrieve for context
 
@@ -191,9 +193,19 @@ class RunAzureRagPipeline(AzureAIService, AzureCosmos, Prompt):
             # predicted_filename = await self.get_openai_response(messages=predicted_filename_prompt,json_object=False)
             
             # Step 4: Search for relevant documents
+            # Use file_names if provided, otherwise fall back to file_name
+            search_filter = file_names if file_names is not None else file_name
             relevant_docs = await self.search_similar_documents(
-                cosmos_data[QUESTION_COL], top_k,file_name
-            )
+                    cosmos_data[QUESTION_COL], top_k, search_filter
+                )
+
+            # relevant_docs = []
+            # for file_name in search_filter:
+            #     sub_relevant_docs = await self.search_similar_documents(
+            #         cosmos_data[QUESTION_COL], top_k, file_name
+            #     )
+            #     relevant_docs = relevant_docs + sub_relevant_docs
+
             #print(f"Relevant documents found: {len(relevant_docs)}")
             # for doc in relevant_docs:
             #     #print("RAG chunk content:", doc["content"][:500])

@@ -164,6 +164,55 @@ def extract_refs_dict_v2(text: str) -> dict[str, list[int]]:
 
     return dict(result)
 
+def extract_pdf_references(text: str) -> dict[str, list[int]]:
+    def _expand_pages(pages_str: str):
+        # Normalize separators
+        s = re.sub(r'\band\b', ',', pages_str, flags=re.IGNORECASE)
+        s = s.replace('–', '-').replace('—', '-')
+        tokens = [t.strip() for t in s.split(',') if t.strip()]
+
+        out = []
+        for t in tokens:
+            m = _PAGE_TOKEN.fullmatch(t)
+            if not m:
+                continue
+            start = int(m.group(1))
+            end = int(m.group(2)) if m.group(2) else start
+            if end >= start:
+                out.extend(range(start, end + 1))
+        return out
+
+    # Matches a single page "7" or a range "7-10" (also supports en/em dashes)
+    _PAGE_TOKEN = re.compile(r'(\d+)\s*(?:[-–—]\s*(\d+))?$')
+
+    result = defaultdict(list)
+
+    # Anchor per line; don't let pages bleed to the next line
+    # line_pattern = re.compile(
+    #     r'^\s*(?:[-•\u2022]|\d+[.)])?\s*'          # optional bullet or "1." / "1)"
+    #     r'(?P<filename>[\w\s\-()&_]+\.pdf)\s*,?\s*'
+    #     r'(?:Pages?|Pg|PP|Pgs?)\s*:?\s*'
+    #     r'(?P<pages>[^\r\n]+?)\s*$',               # capture up to end of line (no newline)
+    #     re.IGNORECASE | re.MULTILINE
+    # )
+
+    line_pattern = re.compile(
+        r'[\s\-•]*'  # optional leading dash, bullet, or whitespace
+        r'(?P<filename>[\w\s\-()&_]+\.pdf)\s*,?\s*'  # PDF filename
+        r'Pages?\s*:?\s*'  # "Page" or "Pages", with optional colon
+        r'(?P<pages>[\d\s, and]+)',  # page numbers
+        re.IGNORECASE
+    )
+
+
+    for m in line_pattern.finditer(text):
+        filename = m.group('filename').strip()
+        pages = _expand_pages(m.group('pages'))
+        if pages:
+            # dedupe & sort
+            result[filename] = sorted(set(pages))
+    return dict(result)
+
 
 def get_relevant_sources(result, response):
     relevant_sources = {}

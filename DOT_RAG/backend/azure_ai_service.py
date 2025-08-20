@@ -1,6 +1,6 @@
 import os
 import traceback
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 from azure.core.credentials import AzureKeyCredential
 
@@ -328,7 +328,7 @@ class AzureAIService(AzureOpenAI, AzureDocumentIntelligence):
 
 
     async def search_similar_documents(
-        self, query: str, top_k: int = 8, filename_filter: Optional[str] = None
+        self, query: str, top_k: int = 8, filename_filter: Optional[Union[str, List[str]]] = None
     ) -> List[Dict[str, Any]]:
         """
         Search for documents similar to the query using vector similarity
@@ -336,6 +336,7 @@ class AzureAIService(AzureOpenAI, AzureDocumentIntelligence):
         Args:
             query: Search query text
             top_k: Number of similar documents to return
+            filename_filter: Single filename string or list of filenames to filter by
 
         Returns:
             List of similar documents with scores and blob URLs
@@ -376,7 +377,19 @@ class AzureAIService(AzureOpenAI, AzureDocumentIntelligence):
             if filename_filter is None:
                 #print("No filename filter applied")
                 filter_expression = None
+            elif isinstance(filename_filter, list):
+                # Handle multiple filenames
+                if len(filename_filter) == 0:
+                    filter_expression = None
+                elif len(filename_filter) == 1:
+                    filter_expression = f"filename eq '{filename_filter[0]}'"
+                else:
+                    # Create OR filter for multiple filenames
+                    filename_conditions = [f"filename eq '{fname}'" for fname in filename_filter]
+                    # filter_expression = " or ".join(filename_conditions)
+                    filter_expression = " or ".join(filename_conditions)
             else:
+                # Handle single filename string
                 filter_expression = f"filename eq '{filename_filter}'"
             #print(f"Filtering results by filename: {filter_expression}")
 
