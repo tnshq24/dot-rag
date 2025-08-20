@@ -1222,9 +1222,9 @@
     <div class="file-selection-modal" id="fileSelectionModal">
         <div class="file-selection-container">
             <button class="close-file-selection-modal" id="closeFileSelectionModalBtn" aria-label="Close file selection" title="Close">&times;</button>
-            <div class="file-selection-title">Select Files to Chat With (Max 2)</div>
+            <div class="file-selection-title">Select Files to Chat With (Max 3)</div>
             <div style="color: #ececf1; text-align: center; margin-bottom: 16px; font-size: 14px;">
-                Selected: <span id="selectionCount">0</span>/2
+                Selected: <span id="selectionCount">0</span>/3
             </div>
             <div class="file-list" id="fileList">
                 <!-- Files will be loaded here -->
@@ -1822,7 +1822,7 @@
                             fileItem.classList.remove('selected');
                         } else {
                             // Checking
-                            if (selectedFiles.length < 2) {
+                            if (selectedFiles.length < 3) {
                                 checkbox.checked = true;
                                 selectedFiles.push(file.value);
                                 fileItem.classList.add('selected');
@@ -1837,7 +1837,7 @@
                             fileItem.classList.remove('selected');
                         } else {
                             // Checking
-                            if (selectedFiles.length < 2) {
+                            if (selectedFiles.length < 3) {
                                 checkbox.checked = true;
                                 selectedFiles.push(file.value);
                                 fileItem.classList.add('selected');
@@ -1859,7 +1859,7 @@
         // Update file selection state (enable/disable files based on selection count)
         function updateFileSelectionState() {
             const fileItems = document.querySelectorAll('.file-item');
-            const maxSelection = 2;
+            const maxSelection = 3;
             const selectionCountElement = document.getElementById('selectionCount');
             
             // Update selection count display
